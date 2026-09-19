@@ -55,6 +55,46 @@ npm run test:steamer  # 只跑四人本
 npm run test:wuyin    # 只跑五人本
 ```
 
+### 传到 GitHub，再在服务器上一键部署
+
+仓库已经初始化好并做好了首次提交（`.env` 和 `.certs` 都在 `.gitignore` 里，不会被提交上去）。
+你在本地建一个空仓库，然后：
+
+```bash
+cd "F:/workplace/online story"
+git remote add origin git@github.com:你的用户名/online-story.git
+git branch -M main
+git push -u origin main
+```
+
+> 首次提交用的是占位身份（`online-story <online-story@users.noreply.github.com>`）。
+> 想换成自己的，改完再 `git commit --amend --reset-author --no-edit` 重新推一次即可。
+
+然后在服务器上：
+
+```bash
+sudo apt update && sudo apt install -y git
+sudo mkdir -p /opt/online-story && sudo chown $USER /opt/online-story
+git clone https://github.com/你的用户名/online-story.git /opt/online-story
+cd /opt/online-story
+sudo bash deploy/install.sh
+```
+
+脚本会依次问你：域名（可留空）、通行码、TURN 地址，然后自动完成装依赖、写 `.env`、装 systemd 服务、
+配 nginx + 申请证书。跑完会打印访问地址。
+
+以后更新就一条命令：
+
+```bash
+cd /opt/online-story && sudo bash deploy/update.sh
+```
+
+想先看看脚本要干什么，可以干跑一遍（不改动系统）：
+
+```bash
+sudo bash deploy/install.sh --dry-run
+```
+
 ### 部署到云服务器
 
 代码已经按可部署的样子收拾过了：配置全走环境变量（`.env.example` 有全部说明）、支持 `ACCESS_CODE` 通行码、收到 `SIGTERM` 会优雅退出、WebRTC 的 STUN/TURN 由服务端下发给浏览器（可以自己配 coturn）。
@@ -147,6 +187,8 @@ public/
   js/voice.js         WebRTC 网状语音
   js/ui.js            DOM 工具、弹窗、线索卡、平面图渲染
 deploy/
+  install.sh          一键部署（依赖 + .env + systemd + nginx + 证书）
+  update.sh           更新已部署的服务
   nginx.conf.example  反代配置（含 WebSocket 升级）
   game.service        systemd 单元
   coturn.conf.example 自建 TURN 的配置

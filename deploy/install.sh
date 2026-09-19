@@ -258,8 +258,8 @@ cat <<SUMMARY
   服务管理    systemctl {status,restart,stop} $SERVICE_NAME
   看日志      journalctl -u $SERVICE_NAME -f
 
-  更新代码后重新部署：
-      cd $PROJECT_DIR && git pull && sudo bash deploy/update.sh
+  以后更新代码（脚本自己会 git pull）：
+      cd $PROJECT_DIR && sudo bash deploy/update.sh
 
 SUMMARY
 
