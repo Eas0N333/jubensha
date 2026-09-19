@@ -492,15 +492,6 @@ input:focus { border-color: var(--line); box-shadow: 0 0 0 3px rgba(216, 167, 90
 .ap-dot.full { background: var(--gold); box-shadow: 0 0 8px rgba(216, 167, 90, 0.5); }
 .ap-display:empty { display: none; }
 
-/* 房间信息气泡 */
-.room-pop {
-  position: absolute; z-index: 40; max-width: 300px;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
-  padding: 12px 14px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
-}
-.room-pop h5 { font-family: var(--serif); font-size: 15px; margin: 0 0 4px; }
-.room-pop p { font-size: 12.5px; color: var(--text-dim); line-height: 1.8; margin: 6px 0 0; }
-
 /* ══════════ 线索墙入口（侧栏只留入口，卡片铺在全屏卡墙上） ══════════ */
 .clue-launcher { display: flex; flex-direction: column; padding: 16px; gap: 12px; min-height: 0; overflow-y: auto; }
 .clue-launcher .cl-head h4 { font-size: 17px; margin: 0 0 2px; }
@@ -889,13 +880,29 @@ input:focus { border-color: var(--line); box-shadow: 0 0 0 3px rgba(216, 167, 90
   backdrop-filter: blur(4px); animation: fade 0.2s ease both;
 }
 .modal-box {
-  position: relative; z-index: 2; max-width: 90vw; max-height: 88vh; overflow: auto;
+  position: relative; z-index: 2; max-height: 88vh; overflow: auto;
+  /* 默认就是一张卡片，不是横贯全屏的条：内容短的弹窗撑到 90vw 会很难看 */
+  width: min(620px, 92vw); max-width: 92vw;
   margin: 4vh auto; background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 12px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
   animation: fade-up 0.24s ease both;
 }
 .modal-box.plain { padding: 26px 28px; max-width: 620px; }
+
+/* 房间环境卡：探索 / 搜证时点房间弹出来的那一张 */
+.modal-box.room-box { width: min(560px, 92vw); }
+.rcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.rcard-head h3 { font-size: 22px; }
+.rcard-head .modal-close { margin: -4px -10px 0 0; }
+.rcard-text {
+  font-family: var(--serif); font-size: 14.5px; line-height: 2.05; color: #d5cec0; margin: 16px 0 0;
+}
+.rcard-note { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; line-height: 1.85; }
+.room-box .modal-actions { padding: 0; margin-top: 22px; }
 .modal-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 18px 22px 0; }
+/* 带标题的弹窗：正文和按钮也要跟标题对齐，别贴着卡片边 */
+.modal-box:not(.plain):not(.host-box) > .modal-head ~ *:not(.modal-actions) { padding-left: 22px; padding-right: 22px; }
+.modal-box:not(.plain):not(.host-box) > .modal-head ~ .modal-actions { padding-left: 22px; padding-right: 22px; }
 .modal-close {
   appearance: none; background: none; border: 0; color: var(--text-dim);
   font-size: 22px; cursor: pointer; line-height: 1; padding: 4px 8px;

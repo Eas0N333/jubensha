@@ -505,21 +505,25 @@ function showRoomInfo(r, { mode }) {
   const actions = [];
   if (mode === 'search') {
     actions.push({
-      label: `在这里搜证（消耗 1 点行动力）`, cls: 'btn-primary',
+      label: '在这里搜证（消耗 1 点行动力）', cls: 'btn-primary',
       onClick: () => { closeModal(); doSearch(r); },
     });
   }
-  openModal(h('div', {},
-    h('p', { class: 'mini-label', text: r.sub }),
-    h('h3', { text: r.name }),
-    h('p', { class: 'cm-text', style: { marginTop: '14px' }, text: r.env }),
-    mode === 'search'
-      ? h('p', { class: 'muted small', text: `这个房间原本藏着 ${r.total} 张线索，还剩 ${r.remaining} 张。` })
-      : null,
-    h('div', { class: 'row', style: { marginTop: '18px' } },
-      ...actions.map((a) => h('button', { class: `btn ${a.cls || ''}`, text: a.label, onclick: a.onClick })),
-      h('button', { class: 'btn btn-ghost', text: '关掉', onclick: closeModal })),
-  ), { head: r.name });
+  actions.push({ label: '关掉', cls: 'btn-ghost', onClick: closeModal });
+
+  openModal(h('div', { class: 'rcard' },
+    h('div', { class: 'rcard-head' },
+      h('div', {},
+        h('p', { class: 'mini-label', text: r.sub }),
+        h('h3', { text: r.name })),
+      h('button', { class: 'modal-close', text: '×', title: '关掉', onclick: closeModal })),
+    h('p', { class: 'rcard-text', text: r.env }),
+    h('p', { class: 'rcard-note', text: mode === 'search'
+      ? `这个房间原本藏着 ${r.total} 张线索，还剩 ${r.remaining} 张。${r.remaining ? '点一下按钮就抽一张。' : '已经被翻空了。'}`
+      : '点遍平面图上的每一个房间，就能拿到这个节点的环境线索。' }),
+    h('div', { class: 'modal-actions' },
+      ...actions.map((a) => h('button', { class: `btn ${a.cls || ''}`, text: a.label, onclick: a.onClick }))),
+  ), { plain: true, cls: 'room-box' });
 }
 
 function doSearch(r) {
