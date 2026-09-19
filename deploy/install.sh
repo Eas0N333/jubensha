@@ -182,6 +182,10 @@ else
     echo "TRUST_PROXY=$([ -n "${DOMAIN:-}" ] && echo 1 || echo 0)"
     [ -n "${DOMAIN:-}" ] && echo "PUBLIC_URL=https://$DOMAIN"
     [ "$SELF_HTTPS" = "1" ] && echo "HTTPS=1"
+    # 公网 IP 一般不在网卡上，显式写进证书 SAN，免得浏览器报"名称不匹配"
+    if [ "$SELF_HTTPS" = "1" ] && [ -n "${SERVER_IP:-}" ] && [ "$SERVER_IP" != "<服务器IP>" ]; then
+      echo "CERT_IP=$SERVER_IP"
+    fi
     [ -n "${ACCESS_CODE:-}" ] && echo "ACCESS_CODE=$ACCESS_CODE"
     [ -n "${TURN_URL:-}" ] && echo "TURN_URL=$TURN_URL"
     [ -n "${TURN_USER:-}" ] && echo "TURN_USER=$TURN_USER"
@@ -234,8 +238,8 @@ fi
 if [ "${NO_NGINX:-0}" = "1" ] || [ -z "${DOMAIN:-}" ]; then
   step "5/6 跳过 nginx / 证书"
   if [ -z "${DOMAIN:-}" ]; then
-    warn "没填域名 —— 走自签证书模式（.env 里已经写了 HTTPS=1）。"
-    warn "安全组记得放行 $PORT，浏览器首次访问会拦一次证书警告。"
+    warn "没填域名 —— 走自签证书模式（.env 里写了 HTTPS=1，证书里带上了 $SERVER_IP）。"
+    warn "安全组记得放行 $PORT，浏览器首次访问会拦一次「不受信任」的警告，点继续前往即可。"
   fi
 else
   step "5/6 配置 nginx 与 HTTPS 证书"

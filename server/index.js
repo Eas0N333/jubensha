@@ -100,10 +100,13 @@ if (WANT_HTTPS) {
       const { generate } = await import('selfsigned');
       const lan = Object.values(os.networkInterfaces()).flat()
         .filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
+      const extraIps = config.certIps.filter((ip) => !lan.includes(ip) && ip !== '127.0.0.1');
+      if (extraIps.length) console.log('  证书额外包含：' + extraIps.join(', '));
       const altNames = [
         { type: 2, value: 'localhost' },
         { type: 7, ip: '127.0.0.1' },
         ...lan.map((ip) => ({ type: 7, ip })),
+        ...extraIps.map((ip) => ({ type: 7, ip })),
       ];
       const pems = await generate([{ name: 'commonName', value: 'localhost' }], {
         days: 3650, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'subjectAltName', altNames }],

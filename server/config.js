@@ -40,6 +40,12 @@ export const config = {
   accessCode: (process.env.ACCESS_CODE || '').trim(),
   /** 打印 banner 用，例如 https://game.example.com */
   publicUrl: (process.env.PUBLIC_URL || '').trim(),
+  /**
+   * 自签证书要额外写进 SAN 的地址。
+   * 云服务器的公网 IP 通常不在网卡上（NAT 到内网 IP），不写进去浏览器会报
+   * 「证书名称不匹配」而不是单纯的「不受信任」——两种都要点继续，但前者更唬人。
+   */
+  certIps: list(process.env.CERT_IP),
   iceServers: buildIceServers(),
   get turnEnabled() { return list(process.env.TURN_URL).length > 0; },
 };
