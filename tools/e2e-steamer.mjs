@@ -7,6 +7,8 @@
 import { io } from 'socket.io-client';
 
 const URL = process.env.URL || 'http://127.0.0.1:5178';
+// 如果目标服务开了 ACCESS_CODE，用 ACCESS=xxx 跑
+const ACCESS = process.env.ACCESS || '';
 const log = (...a) => console.log('  ', ...a);
 let failures = 0;
 const check = (cond, msg) => {
@@ -42,7 +44,7 @@ check(st.drawCapacity >= st.clueTotal, `抽取次数 ${st.drawCapacity} ≥ 线�
 /* ── 三本都要能被开起来，且人数上限各不相同 ─────── */
 for (const [id, size] of [['studio', 3], ['steamer', 4], ['wuyin', 5]]) {
   const t = await mk('探子');
-  await call(t, 'room:create', { name: '探子', scenarioId: id });
+  await call(t, 'room:create', { name: '探子', scenarioId: id, access: ACCESS });
   await until(() => !!t.state);
   check(t.state.scenario.castSize === size, `${id} 的人数上限是 ${size}`);
   check(t.state.rooms.length >= 5, `${id} 的搜证地点 ${t.state.rooms.length} 个`);
@@ -53,7 +55,7 @@ for (const [id, size] of [['studio', 3], ['steamer', 4], ['wuyin', 5]]) {
 
 /* ── 开一局四人本 ───────────────────────────────── */
 const A = await mk('甲');
-const created = await call(A, 'room:create', { name: '甲', scenarioId: 'steamer' });
+const created = await call(A, 'room:create', { name: '甲', scenarioId: 'steamer', access: ACCESS });
 await until(() => !!A.state);
 const code = created.code;
 check(A.state.scenario.id === 'steamer', '开的是四人本');
@@ -62,13 +64,13 @@ check(A.state.scenario.title.includes('江顺号'), `标题：${A.state.scenario
 const B = await mk('乙');
 const C = await mk('丙');
 const D = await mk('丁');
-await call(B, 'room:join', { code, name: '乙' });
-await call(C, 'room:join', { code, name: '丙' });
-await call(D, 'room:join', { code, name: '丁' });
+await call(B, 'room:join', { code, name: '乙', access: ACCESS });
+await call(C, 'room:join', { code, name: '丙', access: ACCESS });
+await call(D, 'room:join', { code, name: '丁', access: ACCESS });
 await until(() => A.state.players.length === 4);
 check(A.state.players.length === 4, '四个人都在船上');
 const E = await mk('戊');
-const eRes = await call(E, 'room:join', { code, name: '戊' });
+const eRes = await call(E, 'room:join', { code, name: '戊', access: ACCESS });
 check(!eRes.ok && eRes.error.includes('4 人本'), `第五个人进不来：${eRes.error}`);
 
 fire(A, 'lobby:pickRole', { roleId: 'azhen' });
@@ -204,7 +206,7 @@ check(A.state.vote.tally.correct === true, '3:1 多数指认荣景行，判定�
 
 /* ── 三本剧本互不串数据 ─────────────────────────── */
 const W = await mk('己');
-await call(W, 'room:create', { name: '己', scenarioId: 'studio' });
+await call(W, 'room:create', { name: '己', scenarioId: 'studio', access: ACCESS });
 await until(() => !!W.state);
 check(W.state.rooms.length === 5 && W.state.scenario.castSize === 3, '三人本不受影响');
 check(!JSON.stringify(W.state).includes('荣景行'), '三人本里没有混进四人本的角色');

@@ -5,6 +5,8 @@
 import { io } from 'socket.io-client';
 
 const URL = process.env.URL || 'http://127.0.0.1:5178';
+// 如果目标服务开了 ACCESS_CODE，用 ACCESS=xxx 跑
+const ACCESS = process.env.ACCESS || '';
 const log = (...a) => console.log('  ', ...a);
 let failures = 0;
 const check = (cond, msg) => {
@@ -40,7 +42,7 @@ check(studio.cast.map((c) => c.name).join('/') === '周晓棠/许青/康福', '�
 
 /* ── 建房：指定三人本 ───────────────────────────── */
 const A = await mk('阿甲');
-const created = await call(A, 'room:create', { name: '阿甲', scenarioId: 'studio' });
+const created = await call(A, 'room:create', { name: '阿甲', scenarioId: 'studio', access: ACCESS });
 await until(() => !!A.state);
 check(created.ok, '建房成功');
 const code = created.code;
@@ -50,14 +52,14 @@ check(A.state.scenario.id === 'studio', '状态里带上了剧本 id');
 
 const B = await mk('阿乙');
 const C = await mk('阿丙');
-await call(B, 'room:join', { code, name: '阿乙' });
-await call(C, 'room:join', { code, name: '阿丙' });
+await call(B, 'room:join', { code, name: '阿乙', access: ACCESS });
+await call(C, 'room:join', { code, name: '阿丙', access: ACCESS });
 await until(() => A.state.players.length === 3);
 check(A.state.players.length === 3, '三个人都在房里');
 
 // 第四个人进不来
 const D = await mk('阿丁');
-const dRes = await call(D, 'room:join', { code, name: '阿丁' });
+const dRes = await call(D, 'room:join', { code, name: '阿丁', access: ACCESS });
 check(!dRes.ok && dRes.error.includes('3 人本'), `第四个人被挡在外面：${dRes.error}`);
 
 /* ── 选角 ────────────────────────────────────────── */
@@ -189,7 +191,7 @@ check(A.state.vote.tally.rows.length === 3, '票数统计覆盖三个角色');
 
 /* ── 两本剧本互不串数据 ──────────────────────────── */
 const W = await mk('阿戊');
-const w = await call(W, 'room:create', { name: '阿戊', scenarioId: 'wuyin' });
+const w = await call(W, 'room:create', { name: '阿戊', scenarioId: 'wuyin', access: ACCESS });
 await until(() => !!W.state);
 check(w.ok && W.state.scenario.castSize === 5, '另一间房开的是五人本');
 check(W.state.scenario.title.includes('雾隐山庄'), '五人本标题正确');
@@ -203,7 +205,7 @@ check(A.state.rooms.length === 5 && W.state.rooms.length === 7, '两间房各自
 
 /* ── 不存在的剧本 id 会退回默认本 ────────────────── */
 const E = await mk('阿己');
-const e = await call(E, 'room:create', { name: '阿己', scenarioId: 'nonexistent' });
+const e = await call(E, 'room:create', { name: '阿己', scenarioId: 'nonexistent', access: ACCESS });
 await until(() => !!E.state);
 check(e.ok && !!E.state.scenario.id, `未知剧本 id 退回默认本（${E.state.scenario.id}）`);
 

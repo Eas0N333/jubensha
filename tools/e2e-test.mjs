@@ -6,6 +6,8 @@
 import { io } from 'socket.io-client';
 
 const URL = process.env.URL || 'http://127.0.0.1:5178';
+// 如果目标服务开了 ACCESS_CODE，用 ACCESS=xxx 跑
+const ACCESS = process.env.ACCESS || '';
 const log = (...a) => console.log('  ', ...a);
 let failures = 0;
 const check = (cond, msg) => {
@@ -37,16 +39,16 @@ const B = await mk('阿乙');
 const C = await mk('阿丙');
 
 /* ── 建房 / 加入 ─────────────────────────────────── */
-const created = await call(A, 'room:create', { name: '阿甲', scenarioId: 'wuyin' });
+const created = await call(A, 'room:create', { name: '阿甲', scenarioId: 'wuyin', access: ACCESS });
 await until(() => !!A.state);
 check(created.ok && /^[A-Z0-9]{4}$/.test(created.code), `建房成功，房号 ${created.code}`);
 check(A.state.scenario.id === 'wuyin', `开的是五人本《${A.state.scenario.title}》`);
 check(A.state.scenario.castSize === 5, '人数上限 5');
 const code = created.code;
 
-const joined = await call(B, 'room:join', { code, name: '阿乙' });
+const joined = await call(B, 'room:join', { code, name: '阿乙', access: ACCESS });
 check(joined.ok, '第二个玩家加入成功');
-const joinedC = await call(C, 'room:join', { code, name: '阿丙' });
+const joinedC = await call(C, 'room:join', { code, name: '阿丙', access: ACCESS });
 check(joinedC.ok, '第三个玩家加入成功');
 
 const badJoin = await call(B, 'room:join', { code: 'ZZZZ', name: 'x' });
