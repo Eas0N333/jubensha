@@ -60,24 +60,45 @@ npm run test:wuyin    # 只跑五人本
 仓库已经初始化好并做好了首次提交（`.env` 和 `.certs` 都在 `.gitignore` 里，不会被提交上去）。
 你在本地建一个空仓库，然后：
 
+仓库地址：**https://github.com/Eas0N333/jubensha**
+
 ```bash
-cd "F:/workplace/online story"
-git remote add origin git@github.com:你的用户名/online-story.git
-git branch -M main
-git push -u origin main
+git clone https://github.com/Eas0N333/jubensha.git
 ```
 
-> 首次提交用的是占位身份（`online-story <online-story@users.noreply.github.com>`）。
-> 想换成自己的，改完再 `git commit --amend --reset-author --no-edit` 重新推一次即可。
+> 改完代码推回自己的仓库：
+> ```bash
+> cd "F:/workplace/online story"
+> git add -A && git commit -m "说明"
+> git push
+> ```
+> 注意：**这台机器直连 github.com 是不通的**（要经本地代理 127.0.0.1:7897）。
+> 如果 push 报 `Could not connect to server`，加上代理再推：
+> ```bash
+> git -c http.proxy=http://127.0.0.1:7897 push
+> ```
+> 想一劳永逸（只对这个仓库生效）：
+> ```bash
+> git config --local http.proxy http://127.0.0.1:7897
+> ```
 
 然后在服务器上：
 
 ```bash
 sudo apt update && sudo apt install -y git
 sudo mkdir -p /opt/online-story && sudo chown $USER /opt/online-story
-git clone https://github.com/你的用户名/online-story.git /opt/online-story
+git clone https://github.com/Eas0N333/jubensha.git /opt/online-story
 cd /opt/online-story
 sudo bash deploy/install.sh
+```
+
+Docker 路线则是：
+
+```bash
+cd /opt/online-story
+sudo bash deploy/docker-mirror.sh    # 国内服务器先配镜像加速，否则拉不动 node:22-alpine
+cp .env.example .env && vim .env     # 至少设 ACCESS_CODE
+docker compose up -d
 ```
 
 脚本会依次问你：域名（可留空）、通行码、TURN 地址，然后自动完成装依赖、写 `.env`、装 systemd 服务、
