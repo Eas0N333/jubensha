@@ -28,6 +28,25 @@ async function loadRtcConfig() {
   }
 }
 
+/* 音量：总音量 / 总静音 / 每人音量，都只影响「我听别人」。
+   存 localStorage，刷新页面不用重新调。 */
+const VOL_KEY = 'jubensha.voice.volume';
+const MUTE_KEY = 'jubensha.voice.muted';
+
+const clamp01 = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1;
+};
+const readStored = (key, dflt) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? dflt : raw;
+  } catch { return dflt; }   // 无痕模式下 localStorage 可能直接抛
+};
+const writeStored = (key, val) => {
+  try { localStorage.setItem(key, String(val)); } catch { /* 存不下就算了 */ }
+};
+
 export class Voice {
   constructor(socket) {
     this.socket = socket;
@@ -38,6 +57,11 @@ export class Voice {
     this.onChange = () => {};
     this._audioCtx = null;
     this._raf = 0;
+    // 音量设置
+    this.volume = clamp01(readStored(VOL_KEY, 1));
+    this.muted = readStored(MUTE_KEY, '0') === '1';
+    this.peerVolume = new Map(); // playerId -> 0~1
+    this.peerMuted = new Set(); // playerId
     this._bind();
   }
 
@@ -102,6 +126,65 @@ export class Voice {
     this.socket.emit('voice:ready', { on: true });
   }
 
+  /* ── 音量 ─────────────────────────────────────
+     全部只作用于远端 <audio> 的音量：调的是「我这里听到多大」，
+     不动别人麦克风的采集，也不影响别人听到的声音。 */
+  setVolume(v) {
+    this.volume = clamp01(v);
+    writeStored(VOL_KEY, this.volume);
+    this._applyAll();
+    this.onChange();
+    return this.volume;
+  }
+
+  setMuted(on) {
+    this.muted = !!on;
+    writeStored(MUTE_KEY, this.muted ? '1' : '0');
+    this._applyAll();
+    this.onChange();
+    return this.muted;
+  }
+
+  toggleMuted() { return this.setMuted(!this.muted); }
+
+  setPeerVolume(id, v) {
+    this.peerVolume.set(id, clamp01(v));
+    this._applyPeer(id);
+    this.onChange();
+  }
+
+  peerVolumeOf(id) { return this.peerVolume.get(id) ?? 1; }
+  isPeerMuted(id) { return this.peerMuted.has(id); }
+
+  setPeerMuted(id, on) {
+    if (on) this.peerMuted.add(id); else this.peerMuted.delete(id);
+    this._applyPeer(id);
+    this.onChange();
+  }
+
+  togglePeerMuted(id) {
+    this.setPeerMuted(id, !this.peerMuted.has(id));
+    return this.peerMuted.has(id);
+  }
+
+  /** 这个人现在实际该放多大声（0 表示完全不放） */
+  gainFor(id) {
+    if (this.muted || this.peerMuted.has(id)) return 0;
+    return clamp01(this.volume * this.peerVolumeOf(id));
+  }
+
+  _applyPeer(id) {
+    const p = this.peers.get(id);
+    if (!p?.audio) return;
+    const g = this.gainFor(id);
+    p.audio.volume = g;
+    p.audio.muted = g <= 0.001;
+  }
+
+  _applyAll() {
+    for (const id of this.peers.keys()) this._applyPeer(id);
+  }
+
   /* ── 内部 ───────────────────────────────────── */
   _ensureAudioCtx() {
     if (!this._audioCtx) {
@@ -133,6 +216,7 @@ export class Voice {
         p.audio = audio;
       }
       p.audio.srcObject = stream;
+      this._applyPeer(id);   // 新来的 peer 也要套用当前音量设置
       p.audio.play().catch(() => {});
       this._watch(stream, { peerId: id });
     };

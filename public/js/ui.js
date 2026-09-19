@@ -81,9 +81,15 @@ export function clueCard(clue, opts = {}) {
     class: `clue-card ${opts.public ? 'public' : ''}`,
     onclick: () => opts.onOpen?.(clue),
   },
-    h('img', { src: artUrl(clue.art), alt: clue.name, loading: 'lazy' }),
+    h('img', {
+      src: artUrl(clue.art), alt: clue.name, loading: 'lazy',
+      // 以后换成真图，某张挂了也别在卡片上留个破图框
+      onerror: (e) => { e.target.remove(); card.classList.add('no-art'); },
+    }),
+    // 关键线索钉在图的角上：卡片窄，混进名字里会把名字挤成两行
+    clue.key ? h('span', { class: 'cc-key-tag', text: '◆ 关键', title: '关键线索' }) : null,
     h('div', { class: 'cc-body' },
-      h('div', { class: 'cc-name' }, clue.name, clue.key ? h('span', { class: 'cc-key', text: ' ◆关键' }) : null),
+      h('div', { class: 'cc-name', text: clue.name }),
       h('div', { class: 'cc-meta', text: clue.roomName || '' }),
       clue.by ? h('div', { class: 'cc-by', text: `由 ${clue.by} 公开` }) : null,
     ),
@@ -99,15 +105,15 @@ export function openClueModal(clue, actions = []) {
     h('p', { class: 'muted small', text: `${clue.roomName || ''}${clue.by ? ` · 由 ${clue.by} 公开` : ' · 未公开'}` }),
     h('p', { class: 'cm-text', text: clue.text }),
   );
-  const box = h('div', { style: { display: 'grid', gridTemplateColumns: '380px 1fr' } },
-    h('img', { src: artUrl(clue.art), alt: clue.name, style: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '10px 0 0 10px' } }),
+  const box = h('div', { class: 'clue-modal' },
+    h('img', { src: artUrl(clue.art), alt: clue.name }),
     body,
   );
   const acts = h('div', { class: 'modal-actions' });
   for (const a of actions) acts.append(h('button', { class: `btn ${a.cls || ''}`, text: a.label, onclick: a.onClick }));
   acts.append(h('button', { class: 'btn btn-ghost', text: '关掉', onclick: closeModal }));
   body.append(acts);
-  return openModal(box, { dismissable: true });
+  return openModal(box, { dismissable: true, cls: 'clue-box' });
 }
 
 /* ── 房间平面图（搜证阶段与「山庄探索」节点共用） ── */

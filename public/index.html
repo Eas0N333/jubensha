@@ -43,12 +43,13 @@
       </div>
 
       <ul class="feature-list">
-        <li><b>实时语音</b> 点一下开麦，名字右边亮绿点</li>
+        <li><b>实时语音</b> 点一下开麦，名字右边亮绿点；音量能总调，也能单独调某个人</li>
         <li><b>私密剧本</b> 每人只看得见自己的本子，点开像翻一本书</li>
         <li><b>任务清单</b> 每个角色都写清了要怎么赢、要瞒什么、这一步该做什么</li>
         <li><b>搜证</b> 平面图上的每个房间都藏着线索卡，抽一张少一张</li>
         <li><b>公开线索</b> 把卡拍到桌上，所有人一起看</li>
         <li><b>解谜节点</b> 密码锁、时间线排序、照片拼图、接线配对、暗房显影</li>
+        <li><b>全员准备</b> 底部显示「2/3 已准备」，都准备好了才翻到下一幕</li>
       </ul>
     </div>
 
@@ -78,6 +79,7 @@
       </button>
     </div>
     <div class="topbar-right">
+      <div class="vol-slot" id="vol-ctl-lobby"></div>
       <button id="btn-lobby-mic" class="btn btn-ghost btn-mic">🎙 语音测试</button>
       <button id="btn-leave-1" class="btn btn-ghost">离开</button>
     </div>
@@ -159,9 +161,15 @@
     </aside>
   </div>
 
+  <!-- 全员准备闸门 -->
+  <div class="ready-bar" id="ready-bar" hidden></div>
+
   <!-- 底部语音 + 聊天 -->
   <div class="dock">
-    <div class="voice-strip" id="voice-strip"></div>
+    <div class="voice-strip" id="voice-strip">
+      <div class="vs-members" id="vs-members"></div>
+      <div class="vol-slot" id="vol-ctl-slot"></div>
+    </div>
     <div class="chat-drawer" id="chat-drawer">
       <div class="chat-log" id="chat-log"></div>
       <form class="chat-form" id="chat-form">
@@ -169,6 +177,8 @@
         <button class="btn btn-primary" type="submit">发送</button>
       </form>
     </div>
+    <!-- 每人音量：固定在语音条上方弹出，不随语音条重绘，免得拖到一半被重建 -->
+    <div class="vol-pop" id="vol-pop" hidden></div>
   </div>
 </section>
 

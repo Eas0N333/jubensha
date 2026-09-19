@@ -52,6 +52,8 @@ class Room {
     this.revealOrder = []; // 公开顺序
     this.votes = new Map(); // playerId -> roleId
     this.voteTimer = null;
+    this.phaseReady = new Set(); // 本幕里点了「准备好了」的 playerId
+    this.readyTimer = null;
     this.chat = [];
     this.log = [];
     for (const n of this.scenario.nodes) this.nodes.set(n.id, { solved: false, attempts: 0, progress: null });
@@ -167,6 +169,7 @@ export function attachGame(io) {
         roleTitle: p.roleId ? room.scenario.roleIndex.get(p.roleId).title : null,
         connected: p.connected,
         ready: p.ready,
+        phaseReady: room.phaseReady.has(p.id),
         isHost: p.isHost,
         isMe: p.id === me.id,
         clueCount: p.clues.size,
@@ -206,6 +209,15 @@ export function attachGame(io) {
           allVoted: allVoted(room),
           mine: room.votes.get(me.id) || null,
           tally: room.phase.kind === 'reveal' ? tallyVotes(room) : null,
+        };
+      })(),
+      readyCheck: (() => {
+        const prog = readyProgress(room);
+        return {
+          ...prog,
+          mine: room.phaseReady.has(me.id),
+          active: readyGateActive(room),
+          waiting: !!room.readyTimer,   // 全员已准备，正在倒数进入下一幕
         };
       })(),
       truth: room.phase.kind === 'reveal' ? room.scenario.truth : null,
@@ -317,6 +329,53 @@ export function attachGame(io) {
     return total > 0 && submitted >= total;
   };
 
+  /** 进入下一幕的准备情况：同样只算在线的人，掉线的人不该把整局卡住 */
+  function readyProgress(room) {
+    const eligible = [...room.players.values()].filter((p) => p.connected);
+    const pending = eligible.filter((p) => !room.phaseReady.has(p.id)).map((p) => p.name);
+    return {
+      total: eligible.length,
+      submitted: eligible.length - pending.length,
+      pending,
+      allReady: eligible.length > 0 && pending.length === 0,
+    };
+  }
+
+  /**
+   * 这一幕要不要等「全员准备」。
+   * 最后一幕没下一幕可去；投票阶段由「所有人都投完」自己决定，都不走准备流程。
+   */
+  const readyGateActive = (room) =>
+    room.started
+    && room.phaseIndex < room.scenario.phases.length - 1
+    && room.phase.kind !== 'vote';
+
+  /** 这一幕推进的闸门过了没（投票阶段看票，其余看准备） */
+  const gateOpen = (room) =>
+    room.phase.kind === 'vote' ? allVoted(room) : readyProgress(room).allReady;
+
+  /**
+   * 全员准备 → 停 1.6 秒再进下一幕。
+   * 留这一小段是让人能反悔：有人撤销准备就把定时器撤掉。
+   */
+  function scheduleAdvance(room) {
+    if (!readyGateActive(room)) return;
+    if (!readyProgress(room).allReady) return;
+    if (room.readyTimer) return;
+    room.readyTimer = setTimeout(() => {
+      room.readyTimer = null;
+      if (!readyGateActive(room) || !readyProgress(room).allReady) return;
+      broadcast(room, 'phase:advancing', {});
+      enterPhase(room, room.phaseIndex + 1);
+    }, 1600);
+  }
+
+  function cancelAdvance(room) {
+    if (!room.readyTimer) return;
+    clearTimeout(room.readyTimer);
+    room.readyTimer = null;
+  }
+
   /**
    * 所有人都投完 → 停 2.5 秒让大家看清票型，然后自动揭晓。
    * 房主也可以随时手动提前揭晓；一旦离开投票阶段就把定时器清掉。
@@ -360,6 +419,8 @@ export function attachGame(io) {
     room.phaseIndex = Math.max(0, Math.min(room.scenario.phases.length - 1, index));
     const phase = room.phase;
     room.addLog(`—— ${phase.name} ——`);
+    cancelAdvance(room);
+    room.phaseReady.clear();   // 每一幕的准备状态重新开始
     if (phase.kind === 'search') {
       for (const p of room.players.values()) p.ap = phase.ap || 2;
       // 第二轮的搜证：如果还有关键线索没翻出来，明确告诉大家还剩几张、在哪些房间。
@@ -392,6 +453,24 @@ export function attachGame(io) {
   io.on('connection', (socket) => {
     const ack = (cb, payload) => { if (typeof cb === 'function') cb(payload); };
 
+    /**
+     * socket.io 会把「没带的参数」序列化成 null，而 `({ a } = {})` 只对 undefined 兜底，
+     * 遇到 null 直接抛异常 —— handler 里抛异常会带走整个进程，一屋子人都掉线。
+     * 所以统一在入口把 null 归一成 {}，并且把异常拦在日志里：
+     * 谁 emit 个空事件都炸不了服务器。
+     */
+    const on = (event, handler) => socket.on(event, (msg, ...rest) => {
+      const fail = (err) => {
+        console.error(`[game] ${event} 处理出错：`, err);
+        const cb = rest[rest.length - 1];
+        if (typeof cb === 'function') cb({ ok: false, error: '服务器处理出错' });
+      };
+      try {
+        const out = handler(msg ?? {}, ...rest);
+        if (out?.catch) out.catch(fail);
+      } catch (err) { fail(err); }
+    });
+
     /** 公网部署时用通行码挡一下，别让路人开房占内存 */
     const badAccess = (access) =>
       config.accessCode && String(access || '').trim() !== config.accessCode;
@@ -407,7 +486,7 @@ export function attachGame(io) {
       pushState(room);
     };
 
-    socket.on('room:create', ({ name, scenarioId, access } = {}, cb) => {
+    on('room:create', ({ name, scenarioId, access } = {}, cb) => {
       if (badAccess(access)) return ack(cb, { ok: false, error: '通行码不对', needAccess: true });
       const code = makeCode(rooms);
       const room = new Room(code, getScenario(scenarioId));
@@ -424,7 +503,7 @@ export function attachGame(io) {
       joinRoomAs(room, player, cb);
     });
 
-    socket.on('room:join', ({ code, name, token, access } = {}, cb) => {
+    on('room:join', ({ code, name, token, access } = {}, cb) => {
       if (badAccess(access)) return ack(cb, { ok: false, error: '通行码不对', needAccess: true });
       const room = rooms.get((code || '').toUpperCase().trim());
       if (!room) return ack(cb, { ok: false, error: '房间不存在，检查一下房号' });
@@ -460,7 +539,7 @@ export function attachGame(io) {
       joinRoomAs(room, player, cb);
     });
 
-    socket.on('lobby:pickRole', ({ roleId } = {}) => {
+    on('lobby:pickRole', ({ roleId } = {}) => {
       const room = roomOf(socket); if (!room || room.started) return;
       const me = room.players.get(socket.data.playerId); if (!me) return;
       if (roleId && !room.scenario.roleIndex.has(roleId)) return;
@@ -471,7 +550,7 @@ export function attachGame(io) {
       pushState(room);
     });
 
-    socket.on('lobby:randomRoles', () => {
+    on('lobby:randomRoles', () => {
       const room = roomOf(socket); if (!room || room.started) return;
       const me = room.players.get(socket.data.playerId);
       if (!me?.isHost) return;
@@ -482,14 +561,14 @@ export function attachGame(io) {
       pushState(room);
     });
 
-    socket.on('lobby:ready', ({ ready } = {}) => {
+    on('lobby:ready', ({ ready } = {}) => {
       const room = roomOf(socket); if (!room) return;
       const me = room.players.get(socket.data.playerId); if (!me) return;
       me.ready = !!ready;
       pushState(room);
     });
 
-    socket.on('game:start', () => {
+    on('game:start', () => {
       const room = roomOf(socket); if (!room || room.started) return;
       const me = room.players.get(socket.data.playerId);
       if (!me?.isHost) return;
@@ -505,23 +584,53 @@ export function attachGame(io) {
       broadcast(room, 'toast', { text: '雨夜开始了。', kind: 'info' });
     });
 
-    socket.on('game:setPhase', ({ index } = {}) => {
+    on('game:setPhase', ({ index } = {}) => {
       const room = roomOf(socket); if (!room?.started) return;
       const me = room.players.get(socket.data.playerId);
       if (!me?.isHost) return;
       enterPhase(room, Number(index) || 0);
     });
 
-    socket.on('game:nextPhase', () => {
-      const room = roomOf(socket); if (!room?.started) return;
+    on('game:nextPhase', ({ force } = {}, cb) => {
+      const room = roomOf(socket); if (!room?.started) return ack(cb, { ok: false, error: '还没开始' });
       const me = room.players.get(socket.data.playerId);
-      if (!me?.isHost) return;
-      if (room.phaseIndex >= room.scenario.phases.length - 1) return;
+      if (!me?.isHost) return ack(cb, { ok: false, error: '只有主持人能推进阶段' });
+      if (room.phaseIndex >= room.scenario.phases.length - 1) return ack(cb, { ok: false, error: '已经是最后一幕了' });
+
+      // 投票阶段看「所有人都投完」，其余阶段看「所有人都点了准备」。
+      // 没过闸门时主持人可以强制推进（前端会先弹确认），但必须显式传 force。
+      if (!gateOpen(room) && !force) {
+        const voting = room.phase.kind === 'vote';
+        const prog = voting ? voteProgress(room) : readyProgress(room);
+        return ack(cb, {
+          ok: false,
+          error: voting
+            ? `还有 ${prog.total - prog.submitted} 人没投票`
+            : `还有 ${prog.total - prog.submitted} 人没准备`,
+          total: prog.total,
+          submitted: prog.submitted,
+          pending: prog.pending,
+        });
+      }
       enterPhase(room, room.phaseIndex + 1);
+      ack(cb, { ok: true });
+    });
+
+    /* ── 全员准备 ───────────────────────────────────── */
+    on('phase:ready', ({ ready } = {}) => {
+      const room = roomOf(socket); if (!room?.started) return;
+      const me = room.players.get(socket.data.playerId); if (!me) return;
+      const want = ready === undefined ? !room.phaseReady.has(me.id) : !!ready;
+      if (want) room.phaseReady.add(me.id);
+      else room.phaseReady.delete(me.id);
+      // 有人撤销准备：把已经排上队的自动推进收回来
+      if (!readyProgress(room).allReady) cancelAdvance(room);
+      pushState(room);
+      scheduleAdvance(room);
     });
 
     /* ── 搜证 ───────────────────────────────────────── */
-    socket.on('search:room', ({ roomId } = {}, cb) => {
+    on('search:room', ({ roomId } = {}, cb) => {
       const room = roomOf(socket); if (!room?.started) return ack(cb, { ok: false, error: '还没开始' });
       const me = room.players.get(socket.data.playerId);
       const phase = room.phase;
@@ -543,7 +652,7 @@ export function attachGame(io) {
     });
 
     /* ── 线索公开 / 转交 ─────────────────────────────── */
-    socket.on('clue:reveal', ({ clueId } = {}, cb) => {
+    on('clue:reveal', ({ clueId } = {}, cb) => {
       const room = roomOf(socket); if (!room) return ack(cb, { ok: false });
       const me = room.players.get(socket.data.playerId);
       if (!me.clues.has(clueId)) return ack(cb, { ok: false, error: '你手上没有这张线索' });
@@ -558,7 +667,7 @@ export function attachGame(io) {
       pushState(room);
     });
 
-    socket.on('clue:give', ({ clueId, toPlayerId } = {}, cb) => {
+    on('clue:give', ({ clueId, toPlayerId } = {}, cb) => {
       const room = roomOf(socket); if (!room) return ack(cb, { ok: false });
       const me = room.players.get(socket.data.playerId);
       const target = room.players.get(toPlayerId);
@@ -585,7 +694,7 @@ export function attachGame(io) {
       return { room, st, node: room.scenario.nodeIndex.get(nodeId) };
     };
 
-    socket.on('node:visit', ({ nodeId, roomId } = {}) => {
+    on('node:visit', ({ nodeId, roomId } = {}) => {
       const g = nodeGuard(nodeId);
       if (g.error || g.node.type !== 'map') return;
       const { room, st, node } = g;
@@ -601,7 +710,7 @@ export function attachGame(io) {
       }
     });
 
-    socket.on('node:submit', ({ nodeId, payload } = {}, cb) => {
+    on('node:submit', ({ nodeId, payload } = {}, cb) => {
       const g = nodeGuard(nodeId);
       if (g.error) return ack(cb, { ok: false, error: g.error, solved: !!g.solved });
       const { room, st, node } = g;
@@ -667,7 +776,7 @@ export function attachGame(io) {
     });
 
     /* ── 投票 ───────────────────────────────────────── */
-    socket.on('vote:cast', ({ roleId } = {}, cb) => {
+    on('vote:cast', ({ roleId } = {}, cb) => {
       const room = roomOf(socket); if (!room?.started) return ack(cb, { ok: false });
       if (room.phase.kind !== 'vote') return ack(cb, { ok: false, error: '还没到投票环节' });
       const me = room.players.get(socket.data.playerId);
@@ -680,7 +789,7 @@ export function attachGame(io) {
     });
 
     /* ── 聊天 ───────────────────────────────────────── */
-    socket.on('chat:send', ({ text } = {}) => {
+    on('chat:send', ({ text } = {}) => {
       const room = roomOf(socket); if (!room) return;
       const me = room.players.get(socket.data.playerId); if (!me) return;
       const body = String(text || '').slice(0, 500).trim();
@@ -692,10 +801,10 @@ export function attachGame(io) {
     });
 
     /* ── 语音信令 ───────────────────────────────────── */
-    socket.on('voice:ready', ({ on } = {}) => {
+    on('voice:ready', ({ on: micOn } = {}) => {
       const room = roomOf(socket); if (!room) return;
       const me = room.players.get(socket.data.playerId); if (!me) return;
-      me.micOn = !!on;
+      me.micOn = !!micOn;
       const peers = [...room.players.values()].filter((p) => p.id !== me.id && p.connected && p.micOn).map((p) => p.id);
       // 新加入者主动向已有成员发起 offer，避免同时双向 offer 造成冲突
       socket.emit('voice:peers', { peers });
@@ -703,7 +812,7 @@ export function attachGame(io) {
       pushState(room);
     });
 
-    socket.on('voice:signal', ({ to, data } = {}) => {
+    on('voice:signal', ({ to, data } = {}) => {
       const room = roomOf(socket); if (!room) return;
       const me = room.players.get(socket.data.playerId);
       const target = room.players.get(to);
@@ -711,7 +820,7 @@ export function attachGame(io) {
       io.to(target.socketId).emit('voice:signal', { from: me.id, name: me.name, data });
     });
 
-    socket.on('voice:leave', () => {
+    on('voice:leave', () => {
       const room = roomOf(socket); if (!room) return;
       const me = room.players.get(socket.data.playerId); if (!me) return;
       me.micOn = false;
@@ -720,12 +829,12 @@ export function attachGame(io) {
     });
 
     /* ── 通用：拿房间日志 / 主动重推状态 ─────────────── */
-    socket.on('sync', () => {
+    on('sync', () => {
       const room = roomOf(socket); if (!room) return;
       pushState(room);
     });
 
-    socket.on('room:leave', () => {
+    on('room:leave', () => {
       const room = roomOf(socket); if (!room) return;
       const me = room.players.get(socket.data.playerId);
       socket.leave(room.code);
@@ -746,6 +855,8 @@ export function attachGame(io) {
       }
       if (room.players.size === 0) rooms.delete(room.code);
       pushState(room);
+      // 卡住准备闸门的人走了，剩下的人就不用再等了
+      if (rooms.has(room.code)) scheduleAdvance(room);
     });
 
     socket.on('disconnect', () => {
@@ -765,7 +876,10 @@ export function attachGame(io) {
         if (next) { next.isHost = true; }
       }
       if (room.players.size === 0) rooms.delete(room.code);
-      else pushState(room);
+      else {
+        pushState(room);
+        scheduleAdvance(room);   // 掉线的人不再挡着「全员准备」
+      }
     });
   });
 

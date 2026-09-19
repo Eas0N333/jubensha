@@ -89,15 +89,27 @@ check(A.state.phaseList.length === 12, `四人本 ${A.state.phaseList.length} �
 check(A.state.rooms.length === 5, '5 个舱室');
 check(A.state.me.ap === 0, '非搜证阶段没有行动力');
 
+/* ── 全员准备闸门 ───────────────────────────────── */
+check(A.state.readyCheck?.active === true, '这一幕要全员准备才推进');
+const blocked = await call(A, 'game:nextPhase', {});
+check(!blocked.ok && blocked.error.includes('没准备'), '没人准备时房主也推不动');
+check(blocked.total === 4 && blocked.submitted === 0, `准备计数 0/${blocked.total}`);
+fire(B, 'phase:ready');
+fire(C, 'phase:ready');
+fire(D, 'phase:ready');
+await until(() => A.state.readyCheck.submitted === 3);
+check(A.state.readyCheck.submitted === 3, '三个人准备 → 3/4，还等房主');
+fire(A, 'phase:ready');
+await until(() => A.state.phase.id === 'tour', 4000);
+check(A.state.phase.id === 'tour', '全员准备后自动进入下一幕');
+
 /* ── 关键线索保底 ───────────────────────────────── */
-fire(A, 'game:nextPhase');
-await until(() => A.state.phase.id === 'tour');
 for (const r of A.state.rooms) { A.s.emit('node:visit', { nodeId: 'tour', roomId: r.id }); await wait(25); }
 await until(() => A.state.node?.solved);
 check(A.state.node.solved, '走遍五个舱室');
 check(A.state.keyLeft.total > 0, `初始还有 ${A.state.keyLeft.total} 张关键线索`);
 
-fire(A, 'game:nextPhase');
+fire(A, 'game:nextPhase', { force: true });
 await until(() => A.state.phase.kind === 'search');
 const ap = A.state.me.ap;
 check(ap === 3, `第一轮每人 ${ap} 点行动力`);
@@ -136,10 +148,10 @@ const over = await call(B, 'search:room', { roomId: 'luggage' });
 check(!over.ok && over.error.includes('行动力'), '行动力用光后不能再搜');
 
 /* ── 第二轮会提示还有哪些房间藏着关键线索 ────────── */
-fire(A, 'game:nextPhase');   // discuss1
+fire(A, 'game:nextPhase', { force: true });   // discuss1
 await until(() => A.state.phase.kind === 'discuss');
 check(B.state.me.script.length === 2, '讨论阶段解锁第二章');
-fire(A, 'game:nextPhase');   // chest
+fire(A, 'game:nextPhase', { force: true });   // chest
 await until(() => A.state.node?.type === 'code');
 check(A.state.node.length === 4, '皮箱是四位密码');
 check(A.state.node.answer === undefined, '不下发密码答案');
@@ -150,7 +162,7 @@ await until(() => A.state.node?.solved);
 check(A.state.node.solved, '正确答案 1112 打开皮箱');
 check(A.state.revealed.some((c) => c.id === 'n_insurance'), '拿到那张保险单');
 
-fire(A, 'game:nextPhase');   // search2
+fire(A, 'game:nextPhase', { force: true });   // search2
 await until(() => A.state.phase.kind === 'search');
 check(A.state.me.ap === 3, '第二轮重新发放 3 点行动力');
 const nudge = A.toasts.find((t) => t.includes('关键线索没被翻出来'));
@@ -158,7 +170,7 @@ check(!!nudge, `第二轮开始会提示关键线索在哪儿：${nudge || '（�
 check(!nudge || A.state.rooms.some((r) => r.name && nudge.includes(r.name)), '提示里点名了具体舱室');
 
 /* ── 验伤连线节点 ───────────────────────────────── */
-fire(A, 'game:nextPhase');   // wounds
+fire(A, 'game:nextPhase', { force: true });   // wounds
 await until(() => A.state.node?.type === 'wire');
 const wire = A.state.node;
 check(wire.lefts.length === 4 && wire.rights.length === 4, '验伤连线左右各 4 项');
@@ -172,10 +184,10 @@ check(A.state.node.solved, '四处痕迹全部对上，验伤完成');
 check(A.state.revealed.some((c) => c.id === 'n_verdict'), '拿到验伤结论（两处伤，靠下那处致命）');
 
 /* ── 时间线 ─────────────────────────────────────── */
-fire(A, 'game:nextPhase');   // discuss2
+fire(A, 'game:nextPhase', { force: true });   // discuss2
 await until(() => A.state.phase.kind === 'discuss');
 check(C.state.me.script.length === 3, '第二轮讨论解锁第三章');
-fire(A, 'game:nextPhase');   // timeline
+fire(A, 'game:nextPhase', { force: true });   // timeline
 await until(() => A.state.node?.type === 'order');
 check(A.state.node.cards.length === 8, '时间线 8 张卡');
 const wrongOrder = await call(A, 'node:submit', { nodeId: 'timeline', payload: { order: [7, 6, 5, 4, 3, 2, 1, 0] } });
@@ -185,10 +197,10 @@ await until(() => A.state.node?.solved);
 check(A.state.node.solved, '排对顺序后解开时间线');
 
 /* ── 投票与真相 ─────────────────────────────────── */
-fire(A, 'game:nextPhase');   // final
+fire(A, 'game:nextPhase', { force: true });   // final
 await until(() => A.state.phase.kind === 'discuss');
 check(C.state.me.script.length === 4, '最终陈述解锁第四章');
-fire(A, 'game:nextPhase');   // vote
+fire(A, 'game:nextPhase', { force: true });   // vote
 await until(() => A.state.phase.kind === 'vote');
 check(A.state.vote.total === 4, '应投票人数 4');
 await call(A, 'vote:cast', { roleId: 'rongjingxing' });

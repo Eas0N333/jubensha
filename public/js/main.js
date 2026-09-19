@@ -223,7 +223,8 @@ function paintGame() {
   $('#btn-host').hidden = !S.isHost;
   const last = ph.index >= ph.total - 1;
   const next = $('#btn-next-phase');
-  next.hidden = !S.isHost || last;
+  // 有准备闸门的时候，推进按钮就在底栏那一条上，顶栏不用再来一个
+  next.hidden = !S.isHost || last || !!S.readyCheck?.active;
   next.textContent = ph.kind === 'vote' ? '揭晓真相 ▶' : '下一阶段 ▶';
 
   // 行动力
@@ -241,6 +242,8 @@ function paintGame() {
   paintClues();
   paintStage();
   paintVoiceStrip();
+  paintReadyBar();
+  syncVolumeControls();
   $('#mine-count').textContent = S.me.clues.length;
   $('#public-count').textContent = S.revealed.length;
 }
@@ -560,7 +563,7 @@ function discussPanel() {
   if (!timerLeft) timerLeft = total;
 
   const tools = h('div', { class: 'row' },
-    S.isHost ? h('button', { class: 'btn btn-primary', text: '进入下一阶段', onclick: nextPhase }) : null,
+    S.isHost ? h('button', { class: 'btn btn-primary', text: '进入下一阶段', onclick: () => nextPhase() }) : null,
     S.isHost ? h('button', { class: 'btn btn-ghost', text: '主持人面板', onclick: openHostPanel }) : null,
   );
 
@@ -838,12 +841,70 @@ function copyCode() {
     .catch(() => toast(`房号是 ${code}`, 'info'));
 }
 
-function nextPhase() {
+function nextPhase(force = false) {
   // 投票阶段提前揭晓要确认，别让人手滑跳过投票
-  if (S?.phase.kind === 'vote' && !S.vote.allVoted) return confirmReveal(false);
-  socket.emit('game:nextPhase');
+  if (!force && S?.phase.kind === 'vote' && !S.vote.allVoted) return confirmReveal(false);
+  socket.emit('game:nextPhase', { force }, (res) => {
+    if (res?.ok) return;
+    // 没过闸门：主持人可以强制推进，其他人只会收到提示
+    if (!force && S?.isHost && Array.isArray(res?.pending) && res.pending.length) {
+      return confirmForceAdvance(res.pending, res.error);
+    }
+    toast(res?.error || '推不动', 'warn');
+  });
 }
-$('#btn-next-phase').onclick = nextPhase;
+
+/* ══════════ 全员准备闸门 ══════════ */
+function paintReadyBar() {
+  const bar = $('#ready-bar');
+  if (!bar) return;
+  const rc = S?.started ? S.readyCheck : null;
+  if (!rc || !rc.active) { bar.hidden = true; bar.innerHTML = ''; return; }
+  bar.hidden = false;
+
+  const meReady = !!rc.mine;
+  const chips = S.players.map((p) => h('span', {
+    class: `rb-chip ${p.phaseReady ? 'ok' : ''} ${p.connected ? '' : 'off'}`,
+    title: p.connected ? '' : '掉线中，不挡推进',
+  }, h('span', { text: p.phaseReady ? '✓' : '○' }), p.roleName || p.name, p.isMe ? '（你）' : ''));
+
+  bar.replaceChildren(
+    h('div', { class: 'rb-left' },
+      h('div', { class: `rb-title ${rc.allReady ? 'ready' : ''}` },
+        rc.allReady
+          ? '全员已准备，马上进入下一幕…'
+          : '这一幕看完、聊够了，就点「我准备好了」'),
+      h('div', { class: 'rb-chips' }, ...chips)),
+    h('div', { class: 'rb-right' },
+      h('div', { class: `rb-count ${rc.allReady ? 'full' : ''}` },
+        h('b', { text: `${rc.submitted}/${rc.total}` }), '已准备'),
+      S.isHost
+        ? h('button', {
+            class: 'btn btn-ghost', text: '强制推进 ▶',
+            title: '不用等所有人，直接进入下一幕',
+            onclick: () => confirmForceAdvance(rc.pending),
+          })
+        : null,
+      h('button', {
+        class: `btn rb-ready ${meReady ? 'on' : ''}`,
+        text: meReady ? '✓ 已准备' : '我准备好了',
+        title: meReady ? '再点一下撤销准备' : '看完了、聊够了，点一下告诉大家',
+        onclick: () => socket.emit('phase:ready', { ready: !meReady }),
+      })));
+}
+
+/** 主持人不等人的时候，先让他看清楚落下的是谁 */
+function confirmForceAdvance(pending = [], why = '') {
+  openModal(h('div', {},
+    h('p', { text: why || `还有 ${pending.length} 人没准备：${pending.join('、')}` }),
+    h('p', { class: 'muted small', text: '强制推进会直接进入下一幕，他们可能还没看完这一幕的内容。' }),
+    h('div', { class: 'row', style: { marginTop: '18px' } },
+      h('button', { class: 'btn btn-primary', text: '还是推进', onclick: () => { closeModal(); nextPhase(true); } }),
+      h('button', { class: 'btn btn-ghost', text: '再等等', onclick: closeModal })),
+  ), { head: '还有人在准备', plain: true });
+}
+
+$('#btn-next-phase').onclick = () => nextPhase();
 $('#btn-host').onclick = () => openHostPanel();
 
 /* ══════════ 侧栏标签页 ══════════ */
@@ -887,19 +948,20 @@ function micDot(p) {
 
 /* ══════════ 语音条 ══════════ */
 function paintVoiceStrip() {
-  const strip = $('#voice-strip');
-  if (!strip || !S) return;
-  strip.innerHTML = '';
+  const members = $('#vs-members');
+  if (!members || !S) return;
+  members.innerHTML = '';
   if (!voice?.enabled) {
-    strip.append(h('span', { class: 'voice-hint', text: '点右上角「开麦」加入语音。五个人一起推理，还是说话最快。' }));
+    closeVolumePop();
+    members.append(h('span', { class: 'voice-hint', text: '点右上角「开麦」加入语音。边翻本子边聊，比打字快得多。' }));
     return;
   }
   const me = S.players.find((p) => p.isMe);
   const onMic = 1 + S.players.filter((p) => !p.isMe && p.micOn).length;
-  strip.append(h('span', { class: 'voice-label' },
+  members.append(h('span', { class: 'voice-label' },
     '语音室', h('b', { text: `${onMic} 人在麦上` })));
 
-  strip.append(h('div', { class: `vp me ${(voice.level || 0) > 0.045 ? 'speaking' : ''}` },
+  members.append(h('div', { class: `vp me ${(voice.level || 0) > 0.045 ? 'speaking' : ''}` },
     h('span', { text: `你（${me?.name || ''}）` }),
     micDotEl(true, (voice.level || 0) > 0.045, me?.name)));
 
@@ -907,7 +969,12 @@ function paintVoiceStrip() {
     if (p.isMe) continue;
     const c = S.cast.find((x) => x.id === p.roleId);
     const connected = voice.peers.has(p.id);
-    strip.append(h('div', { class: `vp ${connected ? '' : 'pending'} ${voice.isSpeaking(p.id) ? 'speaking' : ''}` },
+    members.append(h('div', {
+      class: `vp ${connected ? '' : 'pending'} ${voice.isSpeaking(p.id) ? 'speaking' : ''}`,
+      title: '点一下调这个人的音量',
+      style: { cursor: 'pointer' },
+      onclick: () => openVolumePop(),
+    },
       h('span', { text: c ? c.name : p.name }),
       c ? h('span', { class: 'vp-role', text: p.name }) : null,
       micDot(p),
@@ -981,10 +1048,6 @@ $('#btn-voice').onclick = toggleVoice;
 $('#btn-lobby-mic').onclick = toggleVoice;
 
 async function toggleVoice() {
-  if (!voice) {
-    voice = new Voice(socket);
-    voice.onChange = () => { refreshSpeaking(); paintVoiceButton(); };
-  }
   try {
     const on = await voice.toggle();
     toast(on ? '麦克风已开，其他人能听见你了' : '麦克风已关', on ? 'good' : 'info');
@@ -992,7 +1055,8 @@ async function toggleVoice() {
     toast(err.message || '打不开麦克风', 'warn');
   }
   paintVoiceButton();
-  if (S) paintVoiceStrip();
+  syncVolumeControls();
+  if (S) { paintVoiceStrip(); paintVolumePop(); }
 }
 
 function paintVoiceButton() {
@@ -1002,6 +1066,123 @@ function paintVoiceButton() {
   $('#btn-lobby-mic').classList.toggle('on', on);
   $('#btn-lobby-mic').textContent = on ? '🎙 麦克风已开' : '🎙 语音测试';
 }
+
+/* ══════════ 音量 ══════════
+   总音量控件在「语音条」和「大厅」各挂一个；每人音量在弹层里。
+   控件都建在不会被重绘的容器里（语音条的成员区每次有人说话都会重建）。 */
+const volCtl = [];
+
+// Voice 一进来就建好：音量是「还没开麦的时候」也要能调、能记住的设置。
+// 之前是等点了开麦才 new，结果先拖滑块会被丢掉。
+voice = new Voice(socket);
+voice.onChange = () => { refreshSpeaking(); paintVoiceButton(); };
+
+function makeVolumeControl() {
+  const mute = h('button', {
+    class: 'vol-mute', type: 'button', text: '🔊',
+    title: '静音（只影响你自己听到的声音）',
+    onclick: () => { voice?.toggleMuted(); syncVolumeControls(); paintVolumePop(); },
+  });
+  const range = h('input', {
+    class: 'vol-range', type: 'range', min: '0', max: '100', step: '5',
+    'aria-label': '语音音量', title: '语音音量',
+    oninput: () => { voice?.setVolume(Number(range.value) / 100); syncVolumeControls(); },
+  });
+  const num = h('span', { class: 'vol-num' });
+  const more = h('button', {
+    class: 'vol-more', type: 'button', text: '每人',
+    title: '挨个调每个人的音量',
+    onclick: toggleVolumePop,
+  });
+  const entry = {
+    wrap: h('div', { class: 'vol-ctl' }, mute, range, num, more),
+    mute, range, num, more,
+  };
+  volCtl.push(entry);
+  return entry.wrap;
+}
+
+function syncVolumeControls() {
+  const vol = voice?.volume ?? 1;
+  const muted = !!voice?.muted;
+  const many = (S?.players?.length || 0) > 1;
+  for (const c of volCtl) {
+    // 正在拖的那个别动，否则拖到一半会被重置回去
+    if (document.activeElement !== c.range) c.range.value = String(Math.round(vol * 100));
+    c.num.textContent = muted ? '静音' : `${Math.round(vol * 100)}%`;
+    c.mute.textContent = muted || vol === 0 ? '🔇' : (vol < 0.5 ? '🔉' : '🔊');
+    c.mute.classList.toggle('on', muted);
+    c.range.disabled = muted;
+    c.more.hidden = !many;
+  }
+}
+
+/* 每人音量弹层 */
+function openVolumePop() {
+  const pop = $('#vol-pop');
+  if (!pop) return;
+  pop.hidden = false;
+  paintVolumePop();
+}
+
+function toggleVolumePop() {
+  const pop = $('#vol-pop');
+  if (!pop) return;
+  if (pop.hidden) openVolumePop(); else pop.hidden = true;
+}
+
+function closeVolumePop() {
+  const pop = $('#vol-pop');
+  if (pop) pop.hidden = true;
+}
+
+function paintVolumePop() {
+  const pop = $('#vol-pop');
+  if (!pop || pop.hidden || !S) return;
+  const others = S.players.filter((p) => !p.isMe);
+  const rows = others.map((p) => {
+    const c = S.cast.find((x) => x.id === p.roleId);
+    const name = c ? c.name : p.name;
+    const mute = h('button', {
+      class: `vol-mute ${voice?.isPeerMuted(p.id) ? 'on' : ''}`, type: 'button',
+      text: voice?.isPeerMuted(p.id) ? '🔇' : '🔊',
+      title: `单独把 ${name} 静音`,
+      onclick: () => {
+        voice?.togglePeerMuted(p.id);
+        mute.textContent = voice?.isPeerMuted(p.id) ? '🔇' : '🔊';
+        mute.classList.toggle('on', !!voice?.isPeerMuted(p.id));
+      },
+    });
+    const range = h('input', {
+      class: 'vol-range', type: 'range', min: '0', max: '100', step: '5',
+      value: String(Math.round((voice?.peerVolumeOf(p.id) ?? 1) * 100)),
+      'aria-label': `${name} 的音量`,
+      oninput: () => { voice?.setPeerVolume(p.id, Number(range.value) / 100); },
+    });
+    return h('div', { class: 'vol-row' },
+      h('span', { class: 'vr-name', text: name, title: `${p.name} 扮演` }),
+      range, mute);
+  });
+  pop.replaceChildren(
+    h('div', { class: 'vp-title' },
+      h('span', { text: '每个人的音量' }),
+      h('button', { class: 'vol-mute', type: 'button', text: '×', title: '收起', onclick: closeVolumePop })),
+    ...(rows.length ? rows : [h('div', { class: 'vp-note', text: '还没有别人开口。' })]),
+    h('div', { class: 'vp-note', text: '这里调的是你自己听到的响度，别人那边不受影响。' }),
+  );
+}
+
+$('#vol-ctl-lobby')?.append(makeVolumeControl());
+$('#vol-ctl-slot')?.append(makeVolumeControl());
+syncVolumeControls();
+document.addEventListener('click', (e) => {
+  const pop = $('#vol-pop');
+  if (!pop || pop.hidden) return;
+  if (pop.contains(e.target)) return;
+  // 语音条上的名字和「每人」按钮自己负责开关，别在这里抢着关掉
+  if (e.target.closest?.('.vp, .vol-more')) return;
+  closeVolumePop();
+});
 
 /* ══════════ 阶段推进提示 ══════════ */
 socket.on('phase', ({ name, kind }) => {

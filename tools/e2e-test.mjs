@@ -82,13 +82,46 @@ check(A.state.phase.id === 'prologue', '第一幕是序章');
 check(A.state.phase.kind === 'story', '序章是剧情阶段');
 
 /* 非房主不能推进阶段 */
-fire(B, 'game:nextPhase');
+const notHost = await call(B, 'game:nextPhase', {});
 await wait(200);
 check(B.state.phase.id === 'prologue', '非房主推不动阶段');
+check(!notHost.ok && notHost.error.includes('主持人'), '非房主推进被点名拒绝');
+
+/* ── 全员准备闸门 ───────────────────────────────── */
+check(A.state.readyCheck?.active === true, '这一幕有「全员准备」闸门');
+check(A.state.readyCheck.total === 3 && A.state.readyCheck.submitted === 0, '开局 0/3 人准备');
+check(A.state.readyCheck.mine === false, '房主自己也在准备名单里');
+
+let gate = await call(A, 'game:nextPhase', {});
+check(!gate.ok && gate.error.includes('没准备'), '没人准备时，房主也推不动下一幕');
+check(gate.total === 3 && gate.submitted === 0, '拒绝时把准备情况一并回了（2/3 那种计数）');
+
+fire(B, 'phase:ready');
+await until(() => A.state.readyCheck.submitted === 1);
+check(A.state.readyCheck.submitted === 1, '阿乙点了准备 → 1/3');
+
+fire(C, 'phase:ready');
+await until(() => A.state.readyCheck.submitted === 2);
+check(A.state.readyCheck.submitted === 2, '阿丙也点了 → 2/3');
+check(A.state.readyCheck.allReady === false, '2/3 时闸门还没开');
+
+gate = await call(A, 'game:nextPhase', {});
+check(!gate.ok, '还差房主自己，依然推不动');
+
+fire(B, 'phase:ready', { ready: false });
+await until(() => A.state.readyCheck.submitted === 1);
+check(A.state.readyCheck.submitted === 1, '阿乙撤销准备 → 退回 1/3');
+
+fire(B, 'phase:ready');
+await until(() => A.state.readyCheck.submitted === 2);
+fire(A, 'phase:ready');
+await until(() => A.state.readyCheck.allReady, 1500);
+check(A.state.readyCheck.allReady && A.state.readyCheck.submitted === 3, '三人都准备 → 3/3');
 
 /* ── 节点 1：山庄探索 ───────────────────────────── */
-fire(A, 'game:nextPhase');
-await until(() => A.state.phase.id === 'tour');
+await until(() => A.state.phase.id === 'tour', 4000);
+check(A.state.phase.id === 'tour', '全员准备后自动进入下一幕');
+check(A.state.readyCheck.submitted === 0, '新一幕的准备状态清零');
 check(A.state.node?.type === 'map', '进入地图节点');
 check(A.state.node.answer === undefined, '地图节点不下发答案字段');
 
@@ -104,7 +137,7 @@ check(A.state.me.clues.some((c) => c.id === 'e_dark'), '地图奖励线索已到
 check(A.state.revealed.some((c) => c.id === 'e_bridge'), '环境线索直接进公开线索区');
 
 /* ── 搜证 ────────────────────────────────────────── */
-fire(A, 'game:nextPhase');
+fire(A, 'game:nextPhase', { force: true });
 await until(() => A.state.phase.kind === 'search');
 check(A.state.me.ap === A.state.phase.ap, `搜证阶段发放 ${A.state.me.ap} 点行动力`);
 
@@ -142,11 +175,11 @@ await until(() => B.state.me.clues.length > beforeB);
 check(give.ok, '私下转交线索成功');
 
 /* ── 节点 2：保险柜密码锁 ───────────────────────── */
-fire(A, 'game:nextPhase');   // discuss1
+fire(A, 'game:nextPhase', { force: true });   // discuss1
 await until(() => A.state.phase.kind === 'discuss');
 check(B.state.me.script.length === 2, '讨论阶段解锁第二章');
 
-fire(A, 'game:nextPhase');   // safe
+fire(A, 'game:nextPhase', { force: true });   // safe
 await until(() => A.state.node?.type === 'code');
 check(A.state.node.length === 4, '密码锁是四位');
 check(A.state.node.answer === undefined, '密码锁不下发答案');
@@ -168,10 +201,10 @@ const again = await call(A, 'node:submit', { nodeId: 'safe', payload: { value: '
 check(!again.ok && again.solved, '解开的节点不能重复提交');
 
 /* ── 节点 3：药箱连线 ───────────────────────────── */
-fire(A, 'game:nextPhase');   // search2
+fire(A, 'game:nextPhase', { force: true });   // search2
 await until(() => A.state.phase.kind === 'search');
 check(A.state.me.ap === A.state.phase.ap, '第二轮搜证重新发放行动力');
-fire(A, 'game:nextPhase');   // medbox
+fire(A, 'game:nextPhase', { force: true });   // medbox
 await until(() => A.state.node?.type === 'wire');
 const wireNode = A.state.node;
 check(wireNode.lefts.length === 6 && wireNode.rights.length === 6, '连线题左右各 6 项');
@@ -194,10 +227,10 @@ check(A.state.node.solved, '全部连对后药箱解开');
 check(A.state.revealed.some((c) => c.id === 'n_missing'), '缺两支注射器的线索被公开');
 
 /* ── 节点 4：时间线排序 ─────────────────────────── */
-fire(A, 'game:nextPhase');   // discuss2
+fire(A, 'game:nextPhase', { force: true });   // discuss2
 await until(() => A.state.phase.kind === 'discuss');
 check(B.state.me.script.length === 3, '第二轮讨论解锁第三章');
-fire(A, 'game:nextPhase');   // timeline
+fire(A, 'game:nextPhase', { force: true });   // timeline
 await until(() => A.state.node?.type === 'order');
 const cards = A.state.node.cards;
 check(cards.length === 8, '时间线有 8 张卡');
@@ -216,7 +249,7 @@ check(A.state.node.solved, '时间线排对后解开');
 check(A.state.revealed.some((c) => c.id === 'n_timeline'), '时间线线索被公开');
 
 /* ── 节点 5：拼图 ───────────────────────────────── */
-fire(A, 'game:nextPhase');   // photo
+fire(A, 'game:nextPhase', { force: true });   // photo
 await until(() => A.state.node?.type === 'slide');
 check(A.state.node.image === '/api/art/family', '拼图下发图片地址而不下发答案');
 await call(B, 'node:submit', { nodeId: 'photo', payload: { solved: true } });
@@ -225,9 +258,9 @@ check(A.state.node.solved, '拼图完成后节点解开');
 check(A.state.revealed.some((c) => c.id === 'n_photo'), '修复后的全家福被公开');
 
 /* ── 投票 ────────────────────────────────────────── */
-fire(A, 'game:nextPhase');   // final
+fire(A, 'game:nextPhase', { force: true });   // final
 await until(() => A.state.phase.kind === 'discuss');
-fire(A, 'game:nextPhase');   // vote
+fire(A, 'game:nextPhase', { force: true });   // vote
 await until(() => A.state.phase.kind === 'vote');
 
 const selfVote = await call(A, 'vote:cast', { roleId: 'shenmo' });
