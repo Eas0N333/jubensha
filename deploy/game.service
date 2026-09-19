@@ -1,0 +1,33 @@
+# systemd 单元示例（不用 Docker 的裸机部署）
+#
+#   sudo cp deploy/game.service /etc/systemd/system/online-story.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now online-story
+#   journalctl -u online-story -f
+
+[Unit]
+Description=线上剧本杀 (online story)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/online-story
+# 环境变量写在 /opt/online-story/.env 里（参考 .env.example）
+EnvironmentFile=/opt/online-story/.env
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=3
+# 让 node 收到 SIGTERM 走优雅退出
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# 基本加固：这个服务只读自己的目录，不需要别的权限
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/online-story/.certs
+
+[Install]
+WantedBy=multi-user.target

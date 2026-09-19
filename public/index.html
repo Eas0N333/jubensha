@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雾隐山庄 · 雨夜谜案</title>
+<link rel="icon" href="/api/art/clipping">
+<link rel="stylesheet" href="/css/style.css?v=dev">
+</head>
+<body>
+
+<!-- ══════════ 首页 ══════════ -->
+<section id="screen-home" class="screen active">
+  <div class="home-wrap">
+    <div class="home-left">
+      <p class="kicker" id="home-kicker">线上剧本杀</p>
+      <h1 class="title-xl" id="home-title">线上剧本杀</h1>
+      <p class="lead" id="home-lead">正在读剧本清单…</p>
+
+      <div class="home-scenarios">
+        <p class="mini-label">选一本</p>
+        <div id="scenario-picker" class="scenario-picker"></div>
+      </div>
+
+      <div class="home-form">
+        <label class="field">
+          <span>你的名字</span>
+          <input id="input-name" maxlength="12" placeholder="随便起一个" autocomplete="off">
+        </label>
+        <div class="row">
+          <button id="btn-create" class="btn btn-primary">开一间房</button>
+          <label class="field field-inline">
+            <span>房号</span>
+            <input id="input-code" maxlength="4" placeholder="ABCD" autocomplete="off" style="text-transform:uppercase">
+          </label>
+          <button id="btn-join" class="btn">加入</button>
+        </div>
+        <label class="field" id="access-field" hidden>
+          <span>通行码</span>
+          <input id="input-access" maxlength="32" placeholder="问一下开房的人" autocomplete="off">
+        </label>
+        <p id="home-error" class="error"></p>
+      </div>
+
+      <ul class="feature-list">
+        <li><b>实时语音</b> 点一下开麦，名字右边亮绿点</li>
+        <li><b>私密剧本</b> 每人只看得见自己的本子，点开像翻一本书</li>
+        <li><b>任务清单</b> 每个角色都写清了要怎么赢、要瞒什么、这一步该做什么</li>
+        <li><b>搜证</b> 平面图上的每个房间都藏着线索卡，抽一张少一张</li>
+        <li><b>公开线索</b> 把卡拍到桌上，所有人一起看</li>
+        <li><b>解谜节点</b> 密码锁、时间线排序、照片拼图、接线配对、暗房显影</li>
+      </ul>
+    </div>
+
+    <div class="home-right">
+      <div class="victim-card">
+        <img class="victim-art" id="victim-art" src="/api/art/darkroom" alt="">
+        <div class="victim-body">
+          <p class="mini-label">死者</p>
+          <h3 id="victim-name">…</h3>
+          <p class="muted" id="victim-role">…</p>
+          <hr>
+          <p class="muted small" id="victim-scene">…</p>
+        </div>
+      </div>
+      <div id="home-cast" class="cast-strip"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 大厅 ══════════ -->
+<section id="screen-lobby" class="screen">
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">雾隐山庄</span>
+      <button id="btn-copy-code" class="code-chip" title="点击复制房号">
+        房号 <b id="lobby-code">----</b> <span class="copy-hint">复制</span>
+      </button>
+    </div>
+    <div class="topbar-right">
+      <button id="btn-lobby-mic" class="btn btn-ghost btn-mic">🎙 语音测试</button>
+      <button id="btn-leave-1" class="btn btn-ghost">离开</button>
+    </div>
+  </header>
+
+  <div class="lobby-grid">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>在场的人 <span id="lobby-count" class="badge">0 / 5</span></h3>
+        <span class="muted small">本子是五人本，人齐最好玩</span>
+      </div>
+      <ul id="lobby-players" class="player-list"></ul>
+      <div class="panel-foot row">
+        <button id="btn-ready" class="btn">我准备好了</button>
+        <button id="btn-random" class="btn btn-ghost">随机分角色</button>
+        <button id="btn-start" class="btn btn-primary">开始游戏</button>
+      </div>
+      <p class="muted small hint-block" id="lobby-hint"></p>
+    </div>
+
+    <div class="panel panel-wide">
+      <div class="panel-head">
+        <h3>选择你要扮演的人</h3>
+        <span class="muted small">点了就是你的，别人抢不走</span>
+      </div>
+      <div id="lobby-cast" class="cast-grid"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 游戏 ══════════ -->
+<section id="screen-game" class="screen">
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">雾隐山庄</span>
+      <div class="phase-chip">
+        <b id="phase-name">序章</b>
+        <span id="phase-step" class="muted small">1 / 13</span>
+      </div>
+      <span id="phase-hint" class="phase-hint"></span>
+    </div>
+    <div class="topbar-right">
+      <div id="ap-display" class="ap-display"></div>
+      <button id="btn-voice" class="btn btn-mic" title="开麦 / 关麦">🎙 <span id="voice-label">开麦</span></button>
+      <button id="btn-chat-toggle" class="btn btn-ghost">💬 聊天 <span id="chat-unread" class="unread"></span></button>
+      <button id="btn-next-phase" class="btn btn-primary" hidden>下一阶段 ▶</button>
+      <button id="btn-host" class="btn btn-ghost" hidden>主持人面板</button>
+      <button id="btn-leave-2" class="btn btn-ghost">退出</button>
+    </div>
+  </header>
+
+  <div class="game-grid">
+    <!-- 左：我的本子 -->
+    <aside class="panel side-panel">
+      <div class="me-card" id="me-card"></div>
+      <div class="tabs tabs-sm">
+        <button class="tab active" data-tab="script">我的剧本</button>
+        <button class="tab" data-tab="people">人物</button>
+      </div>
+      <div class="tab-body">
+        <div id="tab-script" class="tab-pane active scroll"></div>
+        <div id="tab-people" class="tab-pane scroll"></div>
+      </div>
+    </aside>
+
+    <!-- 中：主舞台 -->
+    <main class="stage" id="stage"></main>
+
+    <!-- 右：线索 -->
+    <aside class="panel side-panel">
+      <div class="tabs tabs-sm">
+        <button class="tab active" data-tab="mine">我的线索 <span id="mine-count" class="badge">0</span></button>
+        <button class="tab" data-tab="public">公开线索 <span id="public-count" class="badge">0</span></button>
+      </div>
+      <div class="tab-body">
+        <div id="tab-mine" class="tab-pane active scroll"><div class="clue-grid" id="clue-mine"></div></div>
+        <div id="tab-public" class="tab-pane scroll"><div class="clue-grid" id="clue-public"></div></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 底部语音 + 聊天 -->
+  <div class="dock">
+    <div class="voice-strip" id="voice-strip"></div>
+    <div class="chat-drawer" id="chat-drawer">
+      <div class="chat-log" id="chat-log"></div>
+      <form class="chat-form" id="chat-form">
+        <input id="chat-input" placeholder="说点什么…（回车发送）" maxlength="500" autocomplete="off">
+        <button class="btn btn-primary" type="submit">发送</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<div id="fx-root"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/js/main.js?v=dev"></script>
+</body>
+</html>

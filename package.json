@@ -1,0 +1,33 @@
+{
+  "name": "wuyin-manor",
+  "version": "1.0.0",
+  "description": "线上剧本杀：语音 + 剧本 + 搜证 + 讨论 + 解谜节点（五人本《雾隐山庄·雨夜谜案》）",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "https": "node server/index.js --https",
+    "dev": "node --watch server/index.js",
+    "check": "node tools/check-syntax.mjs",
+    "test": "node tools/e2e-test.mjs && node tools/e2e-studio.mjs && node tools/e2e-steamer.mjs",
+    "test:wuyin": "node tools/e2e-test.mjs",
+    "test:studio": "node tools/e2e-studio.mjs",
+    "test:steamer": "node tools/e2e-steamer.mjs",
+    "start:prod": "node --env-file-if-exists=.env server/index.js"
+  },
+  "keywords": [
+    "剧本杀",
+    "murder-mystery",
+    "socket.io",
+    "webrtc"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.22.3",
+    "selfsigned": "^5.5.0",
+    "socket.io": "^4.8.3"
+  }
+}

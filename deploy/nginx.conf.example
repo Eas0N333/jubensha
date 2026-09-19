@@ -1,0 +1,80 @@
+# 反向代理示例：把域名 + HTTPS 交给 nginx，Node 只跑 HTTP
+#
+#   /etc/nginx/sites-available/online-story  →  软链到 sites-enabled
+#   证书用 certbot 申请：certbot --nginx -d game.example.com
+#
+# 关键点只有一个：Socket.IO 的 WebSocket 升级头必须透传，
+# 否则语音信令会掉回轮询，游戏状态也会变得很慢。
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name game.example.com;
+
+    # certbot 会自己加 301 跳转；没配证书前先留着这行
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name game.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/game.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/game.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # 本剧本杀没有大文件上传，8M 足够
+    client_max_body_size 8m;
+
+    # 静态资源和接口
+    location / {
+        proxy_pass         http://127.0.0.1:5178;
+        proxy_http_version 1.1;
+
+        # ↓↓↓ 这两行是 WebSocket 升级，不能省 ↓↓↓
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Port  $server_port;
+
+        # 语音信令是长连接，别让它被 60 秒超时掐断
+        proxy_read_timeout  7d;
+        proxy_send_timeout  7d;
+        proxy_buffering     off;
+    }
+
+    # socket.io 的握手路径单独放一份，规则同上（有些环境需要）
+    location /socket.io/ {
+        proxy_pass         http://127.0.0.1:5178;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout  7d;
+        proxy_send_timeout  7d;
+        proxy_buffering     off;
+    }
+
+    # 线索插画是即时生成的 SVG。缓存头交给 Node 下发（no-cache + ETag），
+    # 别在这里写 expires——那样改了插画要等一小时才更新。
+    location /api/art/ {
+        proxy_pass http://127.0.0.1:5178;
+        proxy_set_header Host $host;
+    }
+}

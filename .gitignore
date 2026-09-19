@@ -1,0 +1,13 @@
+# 依赖
+node_modules/
+
+# 密钥与本地配置 —— 千万别提交上去
+.env
+.env.*
+!.env.example
+.certs/
+
+# 日志与临时文件
+*.log
+.DS_Store
+Thumbs.db

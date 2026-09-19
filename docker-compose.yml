@@ -1,0 +1,17 @@
+# 最省事的部署方式：
+#   cp .env.example .env && vim .env      # 先建 .env，否则这里的 env_file 会报错
+#   docker compose up -d
+# 语音要跨公网的话，在 .env 里把 TURN_URL 指向你自己的 coturn（见 deploy/coturn.conf.example）
+services:
+  game:
+    build: .
+    image: online-story:latest
+    container_name: online-story
+    restart: unless-stopped
+    ports:
+      - "5178:5178"
+    env_file:
+      - .env
+    environment:
+      # 放在 nginx 后面时打开
+      TRUST_PROXY: "1"

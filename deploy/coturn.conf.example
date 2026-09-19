@@ -1,0 +1,30 @@
+# 自建 TURN（给严格 NAT / 移动网络下的玩家转发语音）
+#
+#   安装： sudo apt install coturn
+#   启用： 编辑 /etc/default/coturn，打开 TURN_SERVER_ENABLED=1
+#   配置： 把这份拷成 /etc/turnserver.conf，改掉两处密码和公网 IP
+#   放行： 云服务器安全组里开 3478/udp、3478/tcp，以及 49160-49200/udp
+##############################
+
+listening-port=3478
+# 云服务器要填公网 IP，否则分配到的候选地址客户端连不上
+external-ip=你的公网IP
+realm=game.example.com
+
+# 长期凭据：和 .env 里的 TURN_USER / TURN_PASS 保持一致
+lt-cred-mech
+user=gameuser:换成你自己的密码
+
+# 中转端口范围（记得在安全组里放行同样范围）
+min-port=49160
+max-port=49200
+
+# 别把不需要的接口暴露出去
+no-cli
+no-tls
+no-dtls
+fingerprint
+
+# 日志
+log-file=/var/log/turnserver.log
+simple-log
