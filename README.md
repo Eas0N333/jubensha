@@ -104,6 +104,9 @@ cp .env.example .env && vim .env    # 至少设 ACCESS_CODE
 docker compose up -d
 ```
 
+> 国内服务器如果卡在拉 `node:22-alpine` 上（`dial tcp ...: i/o timeout`），先跑
+> `sudo bash deploy/docker-mirror.sh` —— 它会探测可用的镜像站、写好配置并实测拉取。
+
 完整步骤（nginx 反代 + Let's Encrypt 证书 + coturn）见 **[docs/部署指南.md](docs/部署指南.md)**。
 
 **部署前必须知道的两件事：**
@@ -188,6 +191,7 @@ public/
   js/ui.js            DOM 工具、弹窗、线索卡、平面图渲染
 deploy/
   install.sh          一键部署（依赖 + .env + systemd + nginx + 证书）
+  docker-mirror.sh    国内服务器拉不动镜像时，配 Docker 镜像加速
   update.sh           更新已部署的服务
   nginx.conf.example  反代配置（含 WebSocket 升级）
   game.service        systemd 单元
