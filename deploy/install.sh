@@ -39,6 +39,18 @@ run() {
   fi
 }
 
+# Ubuntu 上 apt 有时会弹 needrestart 的交互问题，脚本里统一压掉
+apt_install() {
+  run env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y "$@"
+}
+
+# 健康检查要跟着 .env 走：开了 HTTPS=1 的话服务是 https，用 http 探会失败
+probe_health() {
+  local port="$1" scheme="http" insecure=""
+  grep -qE '^HTTPS=1' .env 2>/dev/null && { scheme="https"; insecure="-k"; }
+  curl -fsS $insecure --max-time 5 "$scheme://127.0.0.1:$port/api/health"
+}
+
 usage() {
   sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
@@ -63,16 +75,36 @@ step "0/6 检查环境"
 [ -f "$PROJECT_DIR/package.json" ] || die "这里不像项目根目录（找不到 package.json）"
 [ -f "$PROJECT_DIR/server/index.js" ] || die "找不到 server/index.js"
 
-if ! command -v node >/dev/null 2>&1; then
-  die "没装 Node。先装 Node 22（或更高）再跑这个脚本：
-       curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-       sudo apt install -y nodejs"
+node_major() { command -v node >/dev/null 2>&1 && node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
+
+if [ "$(node_major)" -lt 18 ]; then
+  if command -v node >/dev/null 2>&1; then
+    warn "自带 Node 版本太低（$(node -v)），需要 18 以上 —— 这台机器上是 $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
+  else
+    warn "这台机器没装 Node"
+  fi
+  # 老发行版（22.04 之类）apt 里的 nodejs 是 v12，必须走 NodeSource；
+  # 新发行版（26.04 之类）apt 里就是 22，NodeSource 反而可能还没支持，所以两条路都试。
+  if [ "$ASSUME_YES" != "1" ] && [ -t 0 ]; then
+    read -r -p "  现在自动装 Node 22？[Y/n] " _a || true
+    case "${_a:-Y}" in n|N) die "请先自己装 Node 18+ 再跑这个脚本";; esac
+  fi
+  apt_install ca-certificates curl gnupg
+  if run bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -' && apt_install nodejs && [ "$(node_major)" -ge 18 ]; then
+    ok "NodeSource 装好了"
+  else
+    warn "NodeSource 这条路不通（新发行版常常还没被支持），改用系统源"
+    apt_install nodejs
+  fi
+  [ "$(node_major)" -ge 18 ] || die "Node 还是不够新（当前 $(node -v 2>/dev/null || echo 无)）。
+       手动装一下再跑本脚本：
+         curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+         sudo apt install -y nodejs"
 fi
 
 NODE_BIN="$(command -v node)"
 NODE_REAL="$(readlink -f "$NODE_BIN" 2>/dev/null || echo "$NODE_BIN")"
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" -ge 18 ] || die "Node 版本太低（当前 $(node -v)），需要 18 以上"
+NODE_MAJOR="$(node_major)"
 ok "Node $(node -v) → $NODE_REAL"
 
 if [[ "$NODE_REAL" == "$HOME"* && -n "${SUDO_USER:-}" ]]; then
@@ -208,7 +240,7 @@ if [ "${NO_NGINX:-0}" = "1" ] || [ -z "${DOMAIN:-}" ]; then
 else
   step "5/6 配置 nginx 与 HTTPS 证书"
   if ! command -v nginx >/dev/null 2>&1; then
-    run apt-get install -y nginx
+    apt_install nginx
   fi
   CONF_SRC="$PROJECT_DIR/deploy/nginx.conf.example"
   CONF_DST="/etc/nginx/sites-available/$SERVICE_NAME"
@@ -229,18 +261,40 @@ else
       warn "certbot 没成功（域名解析到这台机器了吗？80 端口通吗？）稍后可以手动跑：certbot --nginx -d $DOMAIN"
   else
     warn "没装 certbot，先给你装上"
-    run apt-get install -y certbot python3-certbot-nginx
+    apt_install certbot python3-certbot-nginx
     run certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect --register-unsafely-without-email || \
       warn "certbot 没成功，稍后手动跑：sudo certbot --nginx -d $DOMAIN"
   fi
+fi
+
+# ── 5.5 防火墙 ───────────────────────────────────────
+step "5.5 放行端口"
+if ! command -v ufw >/dev/null 2>&1; then
+  ok "没装 ufw，跳过（云服务器记得在安全组里放行端口）"
+elif ! ufw status 2>/dev/null | grep -q "Status: active"; then
+  ok "ufw 未启用，跳过"
+else
+  PORTS=(80 443)
+  [ -n "${DOMAIN:-}" ] || PORTS+=("$PORT")
+  for p in "${PORTS[@]}"; do
+    run ufw allow "$p"/tcp
+    ok "已放行 $p/tcp"
+  done
+  if [ -n "${TURN_URL:-}" ]; then
+    run ufw allow 3478/udp
+    run ufw allow 3478/tcp
+    ok "已放行 3478（coturn）—— 转发端口范围 49160-49200/udp 记得也放行"
+  fi
+  warn "用 Docker 的情况下 ufw 管不住已发布端口（Docker 自己插 iptables 规则），"
+  warn "真正的开关在云服务商的安全组里。"
 fi
 
 # ── 6. 自查 ──────────────────────────────────────────
 step "6/6 自查"
 sleep 2
 if [ "$DRY_RUN" = "0" ]; then
-  if curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
-    ok "健康检查通过"
+  if probe_health "$PORT" >/dev/null 2>&1; then
+    ok "健康检查通过（$([ -f .env ] && grep -qE '^HTTPS=1' .env && echo https || echo http)://127.0.0.1:$PORT）"
   else
     warn "健康检查没通过，看看日志：journalctl -u $SERVICE_NAME -n 50 --no-pager"
   fi

@@ -47,8 +47,8 @@ fi
 step "4/4 健康检查"
 PORT="$(grep -E '^PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
 PORT="${PORT:-5178}"
-if curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
-  ok "健康检查通过（端口 $PORT）"
+if probe_health "$PORT" >/dev/null 2>&1; then
+  ok "健康检查通过（端口 $PORT，$([ -f .env ] && grep -qE '^HTTPS=1' .env && echo https || echo http)）"
 else
   warn "健康检查没通过，看日志：journalctl -u $SERVICE_NAME -n 50 --no-pager"
   exit 1
