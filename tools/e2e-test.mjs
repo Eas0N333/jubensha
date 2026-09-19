@@ -162,6 +162,7 @@ check(rev.ok, `公开线索「${mine.name}」成功`);
 await until(() => B.state.revealed.some((c) => c.id === mine.id));
 check(B.state.revealed.some((c) => c.id === mine.id), '乙能看到甲公开的线索');
 check(B.state.me.clues.every((c) => c.id !== mine.id), '公开的线索不会复制进别人的手牌（走公共线索区）');
+check(B.state.revealed.find((c) => c.id === mine.id)?.by === '阿甲', '公开线索上记着是谁拍上桌的');
 
 // 公开自己没有的线索
 const rev2 = await call(B, 'clue:reveal', { clueId: 'p_ash' });

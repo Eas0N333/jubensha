@@ -2,10 +2,11 @@
  * 客户端主程序：连接、三块屏幕（首页 / 大厅 / 游戏）、按阶段渲染主舞台。
  */
 
-import { $, $$, h, esc, artUrl, toast, openModal, closeModal, clueCard, openClueModal, renderFloorPlan, isModalOpen } from './ui.js';
+import { $, $$, h, esc, artUrl, toast, openModal, closeModal, renderFloorPlan, isModalOpen } from './ui.js';
 import { createMiniGame } from './minigames.js';
 import { Voice } from './voice.js';
 import { openBook, refreshBook, refreshBookMics, closeBook, isBookOpen } from './book.js';
+import { openClueWall, closeClueWall, refreshClueWall, isClueWallOpen } from './clues.js';
 
 /* ══════════ 全局状态 ══════════ */
 const socket = io({ transports: ['websocket', 'polling'] });
@@ -18,6 +19,8 @@ let timerLeft = 0;
 let unread = 0;
 let chatOpen = false;
 let currentCode = null;   // 用来发现「换了房间」
+let pendingClueFocus = null;  // 刚抽到的线索：等状态到位就把线索墙翻开停在这一张
+let clueFocusTimer = 0;
 
 const LS = {
   get name() { return localStorage.getItem('wuyin.name') || ''; },
@@ -244,8 +247,6 @@ function paintGame() {
   paintVoiceStrip();
   paintReadyBar();
   syncVolumeControls();
-  $('#mine-count').textContent = S.me.clues.length;
-  $('#public-count').textContent = S.revealed.length;
 }
 
 function paintMeCard() {
@@ -346,41 +347,51 @@ function paintPeople() {
   }
 }
 
+/* ── 线索墙的入口面板 ─────────────────────────────── */
+/* 线索本身铺在全屏的「线索墙」上，侧栏只留一个入口：
+   两个计数 + 两个按钮 + 最近抽到的四张缩略图。 */
 function paintClues() {
-  const mine = $('#clue-mine');
-  mine.innerHTML = '';
-  if (!S.me.clues.length) {
-    mine.append(h('div', { class: 'empty-note', text: '还没有线索。到搜证阶段，在中间的地图上点房间抽取。' }));
-  }
-  for (const c of S.me.clues) {
-    mine.append(clueCard(c, { onOpen: (clue) => openMyClue(clue) }));
-  }
+  const box = $('#clue-launcher');
+  if (!box) return;
+  box.innerHTML = '';
 
-  const pub = $('#clue-public');
-  pub.innerHTML = '';
-  if (!S.revealed.length) {
-    pub.append(h('div', { class: 'empty-note', text: '还没有人公开线索。把线索拍到桌上，是全房间共享信息最快的方法。' }));
-  }
-  for (const c of S.revealed) {
-    pub.append(clueCard(c, { public: true, onOpen: (clue) => openClueModal(clue) }));
-  }
+  const stat = (n, label, tab) => h('button', {
+    class: 'cl-stat', onclick: () => openWall(tab),
+  }, h('b', { text: String(n) }), h('span', { text: label }));
+
+  const recent = S.me.clues.slice(-4).reverse();
+  box.append(
+    h('div', { class: 'cl-head' },
+      h('h4', { text: '线索墙' }),
+      h('span', { class: 'muted small', text: '抽到的卡都摊在那面墙上' })),
+    h('div', { class: 'cl-stats' },
+      stat(S.me.clues.length, '我的线索', 'mine'),
+      stat(S.revealed.length, '公开线索', 'public')),
+    h('button', { class: 'btn btn-primary cl-open', text: '翻开线索墙 ▶', onclick: () => openWall('mine') }),
+    recent.length
+      ? h('div', { class: 'cl-recent' },
+          h('div', { class: 'mini-label', text: '最近抽到' }),
+          h('div', { class: 'cl-thumbs' }, ...recent.map((c) => h('div', {
+            class: `cl-thumb ${c.key ? 'key' : ''}`,
+            title: `${c.name}（点开看全文）`,
+            onclick: () => openWall('mine', c.id),
+          },
+            h('img', { src: artUrl(c.art), alt: c.name, loading: 'lazy' }),
+            h('span', { text: c.name })))))
+      : h('p', { class: 'muted small', style: { marginTop: '14px' }, text: '还没有线索。到搜证阶段，在中间的地图上点房间抽取。' }),
+  );
 }
 
-function openMyClue(clue) {
-  const actions = [];
-  if (!S.revealed.some((c) => c.id === clue.id)) {
-    actions.push({
-      label: '公开这张线索', cls: 'btn-primary',
-      onClick: () => socket.emit('clue:reveal', { clueId: clue.id }, (res) => {
-        if (res?.ok) closeModal(); else toast(res?.error || '公开失败', 'warn');
-      }),
-    });
-  }
-  actions.push({
-    label: '私下交给某人',
-    onClick: () => pickPlayerToGive(clue),
+/** 打开线索墙。focus 传某张卡的 id 时，直接展开那一张 */
+function openWall(tab = 'mine', focus = null) {
+  openClueWall(S, {
+    tab, focus,
+    onReveal: (clue) => socket.emit('clue:reveal', { clueId: clue.id }, (res) => {
+      if (res?.ok) toast(`「${clue.name}」已经拍到桌上`, 'good');
+      else toast(res?.error || '公开失败', 'warn');
+    }),
+    onGive: (clue) => pickPlayerToGive(clue),
   });
-  openClueModal(clue, actions);
 }
 
 function pickPlayerToGive(clue) {
@@ -517,7 +528,8 @@ function doSearch(r) {
   socket.emit('search:room', { roomId: r.id }, (res) => {
     if (!res?.ok) return toast(res?.error || '搜不了', 'warn');
     flyCard(res.clue);
-    setTimeout(() => openMyClue(res.clue), 620);
+    // 抽到的卡落到手上了，紧接着把线索墙翻开、停在这一张上（等状态推送到位）
+    pendingClueFocus = res.clue.id;
   });
 }
 
@@ -1223,6 +1235,8 @@ socket.on('state', (state) => {
     currentCode = state.code;
     voice?.reannounce();   // 换房间后重新登记麦克风状态
     closeBook();           // 换局了就把上一局的本子合上
+    closeClueWall();
+    pendingClueFocus = null;
   }
   const prevChapters = S?.me?.script?.length || 0;
   S = state;
@@ -1232,6 +1246,17 @@ socket.on('state', (state) => {
     toast(`新章节解锁：${fresh.title}`, 'good', 6000);
   }
   if (isBookOpen()) refreshBook(S);
+  if (isClueWallOpen()) refreshClueWall(S);
+
+  // 刚抽到的线索：等卡牌飞行动画走完，再把线索墙翻开停在这一张上
+  if (pendingClueFocus && state.me.clues.some((c) => c.id === pendingClueFocus) && !clueFocusTimer) {
+    clueFocusTimer = setTimeout(() => {
+      clueFocusTimer = 0;
+      if (!pendingClueFocus) return;
+      openWall('mine', pendingClueFocus);
+      pendingClueFocus = null;
+    }, 700);
+  }
 
   if (!state.started) {
     show('screen-lobby');
@@ -1254,6 +1279,7 @@ socket.on('connect', () => { if (S?.code) socket.emit('sync'); });
 socket.on('room:kicked', () => {
   voice?.disable();
   closeBook();
+  closeClueWall();
   S = null;
   destroyGame();
   closeModal();
@@ -1265,6 +1291,7 @@ socket.on('room:kicked', () => {
 function leave() {
   voice?.disable();
   closeBook();
+  closeClueWall();
   socket.emit('room:leave');
   S = null;
   destroyGame();
@@ -1278,7 +1305,11 @@ $('#btn-leave-2').onclick = () => {
 
 /* ══════════ 快捷键 ══════════ */
 document.addEventListener('keydown', (e) => {
-  if (isModalOpen() || isBookOpen() || /input|textarea/i.test(e.target.tagName)) return;
+  if (isModalOpen() || isBookOpen() || isClueWallOpen() || /input|textarea/i.test(e.target.tagName)) return;
   if (e.key === 'm' || e.key === 'M') toggleVoice();
   if (e.key === 'c' || e.key === 'C') $('#btn-chat-toggle').click();
+  if ((e.key === 'l' || e.key === 'L') && S?.started) {
+    if (isClueWallOpen()) closeClueWall();
+    else openWall('mine');
+  }
 });

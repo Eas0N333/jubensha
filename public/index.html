@@ -46,8 +46,8 @@
         <li><b>实时语音</b> 点一下开麦，名字右边亮绿点；音量能总调，也能单独调某个人</li>
         <li><b>私密剧本</b> 每人只看得见自己的本子，点开像翻一本书</li>
         <li><b>任务清单</b> 每个角色都写清了要怎么赢、要瞒什么、这一步该做什么</li>
-        <li><b>搜证</b> 平面图上的每个房间都藏着线索卡，抽一张少一张</li>
-        <li><b>公开线索</b> 把卡拍到桌上，所有人一起看</li>
+        <li><b>搜证</b> 平面图上的房间点一下抽一张线索卡，抽一张少一张</li>
+        <li><b>线索墙</b> 抽到的卡摊成一整面墙，点开哪张才看全文，一键公开给全房间</li>
         <li><b>解谜节点</b> 密码锁、时间线排序、照片拼图、接线配对、暗房显影</li>
         <li><b>全员准备</b> 底部显示「2/3 已准备」，都准备好了才翻到下一幕</li>
       </ul>
@@ -148,16 +148,9 @@
     <!-- 中：主舞台 -->
     <main class="stage" id="stage"></main>
 
-    <!-- 右：线索 -->
+    <!-- 右：线索墙入口（线索本身铺在全屏的卡墙上） -->
     <aside class="panel side-panel">
-      <div class="tabs tabs-sm">
-        <button class="tab active" data-tab="mine">我的线索 <span id="mine-count" class="badge">0</span></button>
-        <button class="tab" data-tab="public">公开线索 <span id="public-count" class="badge">0</span></button>
-      </div>
-      <div class="tab-body">
-        <div id="tab-mine" class="tab-pane active scroll"><div class="clue-grid" id="clue-mine"></div></div>
-        <div id="tab-public" class="tab-pane scroll"><div class="clue-grid" id="clue-public"></div></div>
-      </div>
+      <div id="clue-launcher" class="clue-launcher"></div>
     </aside>
   </div>
 

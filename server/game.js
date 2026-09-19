@@ -50,6 +50,7 @@ class Room {
     this.nodes = new Map(); // nodeId -> { solved, attempts, progress }
     this.revealed = new Set(); // 已公开线索 id
     this.revealOrder = []; // 公开顺序
+    this.revealBy = new Map(); // 线索 id -> 谁把它拍上桌的（解谜奖励的空着）
     this.votes = new Map(); // playerId -> roleId
     this.voteTimer = null;
     this.phaseReady = new Set(); // 本幕里点了「准备好了」的 playerId
@@ -199,7 +200,12 @@ export function attachGame(io) {
         attempts: room.nodes.get(n.id).attempts,
       })),
       visited: [...room.visited],
-      revealed: room.revealOrder.map((id) => pubClue(room.scenario.clueIndex.get(id))).filter(Boolean),
+      revealed: room.revealOrder
+        .map((id) => {
+          const c = room.scenario.clueIndex.get(id);
+          return c ? { ...pubClue(c), by: room.revealBy.get(id) || null } : null;
+        })
+        .filter(Boolean),
       vote: (() => {
         const prog = voteProgress(room);
         return {
@@ -659,6 +665,7 @@ export function attachGame(io) {
       if (room.revealed.has(clueId)) return ack(cb, { ok: false, error: '已经公开过了' });
       room.revealed.add(clueId);
       room.revealOrder.push(clueId);
+      room.revealBy.set(clueId, me.name);
       me.score += 1;
       const clue = pubClue(room.scenario.clueIndex.get(clueId));
       room.addLog(`${me.name} 公开了线索「${clue.name}」`);
