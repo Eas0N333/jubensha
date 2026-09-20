@@ -16,6 +16,13 @@ step() { printf "\n${c_step}▶ %s${c_reset}\n" "$*"; }
 ok()   { printf "  ${c_ok}✓${c_reset} %s\n" "$*"; }
 warn() { printf "  ${c_warn}!${c_reset} %s\n" "$*"; }
 
+# 健康检查要跟着 .env 走：开了 HTTPS=1 的话服务是 https，用 http 探会失败
+probe_health() {
+  local port="$1" scheme="http" insecure=""
+  grep -qE '^HTTPS=1' .env 2>/dev/null && { scheme="https"; insecure="-k"; }
+  curl -fsS $insecure --max-time 5 "$scheme://127.0.0.1:$port/api/health"
+}
+
 cd "$PROJECT_DIR"
 
 step "1/4 拉取最新代码"

@@ -1,11 +1,16 @@
-# 反向代理示例（已经签过证书的版本）：HTTPS 交给 nginx，Node 只跑 HTTP
+# 反向代理：先让 nginx 用 80 端口把域名接过来，证书随后由 certbot 加上。
 #
-#   /etc/nginx/sites-available/online-story  →  软链到 sites-enabled
-#   证书用 certbot 申请：sudo certbot --nginx -d 你的域名
+#   sudo cp deploy/nginx.http.conf.example /etc/nginx/sites-available/online-story
+#   sudo vim /etc/nginx/sites-available/online-story      # 把 game.example.com 换成你的域名
+#   sudo ln -s /etc/nginx/sites-available/online-story /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d 你的域名                       # 这一步会往本文件里写 443 + 证书 + 301
 #
-# 第一次部署请先用 deploy/nginx.http.conf.example（那份不写 ssl_certificate，
-# 证书还没签下来时 nginx -t 不会失败），签好证书后再用这一份。
-# 部署脚本会自动按证书在不在来选，不用手动挑。
+# 为什么第一份配置里不直接写 ssl_certificate：证书还不存在时 nginx -t 会直接失败
+# （cannot load certificate），nginx 也就 reload 不了，域名根本接不起来。
+# 所以顺序必须是「先 HTTP 通，再让 certbot 补 TLS」。
+#
+# 已经签过证书之后（比如重跑部署脚本），直接用 deploy/nginx.conf.example。
 #
 # 关键点只有一个：Socket.IO 的 WebSocket 升级头必须透传，
 # 否则语音信令会掉回轮询，游戏状态也会变得很慢。
@@ -19,21 +24,6 @@ server {
     listen 80;
     listen [::]:80;
     server_name game.example.com;
-
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    # 不写 http2：Ubuntu 22.04 / 24.04 自带的 nginx 是 1.18 / 1.24，
-    # 「http2 on;」要 1.25.1 以上才认，写了会让 nginx -t 直接报 unknown directive。
-    server_name game.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/game.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/game.example.com/privkey.pem;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
 
     # 本剧本杀没有大文件上传，8M 足够
     client_max_body_size 8m;

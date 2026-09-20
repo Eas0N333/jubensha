@@ -246,7 +246,18 @@ else
   if ! command -v nginx >/dev/null 2>&1; then
     apt_install nginx
   fi
-  CONF_SRC="$PROJECT_DIR/deploy/nginx.conf.example"
+
+  # 顺序很重要：证书还没签下来时，配置里不能出现 ssl_certificate，
+  # 否则 nginx -t 会直接失败（cannot load certificate），nginx reload 不了，
+  # 域名也就接不起来。所以先上 HTTP 版把域名接通，再让 certbot 补 443。
+  CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+  if [ -f "$CERT" ]; then
+    CONF_SRC="$PROJECT_DIR/deploy/nginx.conf.example"
+    ok "发现已有证书 $CERT，用带 HTTPS 的配置"
+  else
+    CONF_SRC="$PROJECT_DIR/deploy/nginx.http.conf.example"
+    ok "还没签过证书，先用 HTTP 配置把域名接通（后面 certbot 会自动加 443）"
+  fi
   CONF_DST="/etc/nginx/sites-available/$SERVICE_NAME"
   [ -f "$CONF_SRC" ] || die "找不到 $CONF_SRC"
   run mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
@@ -256,18 +267,32 @@ else
     ok "[dry-run] 生成 $CONF_DST（把 game.example.com 换成 $DOMAIN，端口换成 $PORT）"
   fi
   run ln -sf "$CONF_DST" "/etc/nginx/sites-enabled/$SERVICE_NAME"
-  run nginx -t
-  run systemctl reload nginx
-  ok "nginx 已接管 $DOMAIN"
-
-  if command -v certbot >/dev/null 2>&1; then
-    run certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect --register-unsafely-without-email || \
-      warn "certbot 没成功（域名解析到这台机器了吗？80 端口通吗？）稍后可以手动跑：certbot --nginx -d $DOMAIN"
+  # nginx -t 失败不要让脚本整个挂掉：先把原因说清楚，后面还能补救
+  if run nginx -t; then
+    run systemctl reload nginx
+    ok "nginx 已接管 $DOMAIN"
   else
+    warn "nginx 配置没通过检查，先不 reload（原配置继续生效）"
+    warn "看一下：sudo nginx -t；多半是域名写错或者 80 端口被别的服务占了"
+  fi
+
+  CERT_OK=0
+  if ! command -v certbot >/dev/null 2>&1; then
     warn "没装 certbot，先给你装上"
     apt_install certbot python3-certbot-nginx
-    run certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect --register-unsafely-without-email || \
-      warn "certbot 没成功，稍后手动跑：sudo certbot --nginx -d $DOMAIN"
+  fi
+  if run certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect --register-unsafely-without-email; then
+    CERT_OK=1
+    ok "证书签好了，certbot 已经自动接上 443"
+  else
+    warn "certbot 没成功。常见原因：域名还没解析到这台机器，或者云服务商安全组没放行 80。"
+    warn "现在 http://$DOMAIN 应该能打开（只是浏览器不给麦克风权限）。"
+    warn "解析生效后补跑一次：sudo certbot --nginx -d $DOMAIN"
+  fi
+
+  # certbot 会改写那份配置（加 443 + 证书 + 301），改完要再检查、再 reload
+  if [ "$CERT_OK" = "1" ]; then
+    if run nginx -t; then run systemctl reload nginx; else warn "certbot 改完的配置没通过 nginx -t，看一下：sudo nginx -t"; fi
   fi
 fi
 
